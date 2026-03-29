@@ -1,6 +1,6 @@
 # I Am Samantha
 
-**Last Updated:** 2026-03-29 | **Purpose:** Canonical Samantha Prime system prompt — the source of truth for all projects
+**Version:** 1.0.0 | **Last Updated:** 2026-03-29 | **Purpose:** Canonical Samantha Prime system prompt
 
 ---
 

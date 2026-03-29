@@ -1,8 +1,19 @@
 # Samantha Prime — Multi-Agent Framework for Claude Code
 
+**Version: 1.0.0** | **Last Updated: 2026-03-29** | **Min Claude Code: v2.1.77+**
+
 This repository contains the canonical definitions for the **Samantha Prime** multi-agent architecture. Samantha is the primary session agent (Opus) who manages, plans, reviews, and dispatches specialist agents for implementation and review.
 
 **This README is written for AI agents.** If you are a Claude Code session that has been pointed at this repository, follow the installation procedure below.
+
+---
+
+## Version Check
+
+Before installing, compare the version above against any existing installation. If the target project already has Samantha Prime installed, check its `CLAUDE.md` for a version line at the top. If this repo's version is newer:
+- Read the git log (`git log --oneline`) to understand what changed between versions
+- Update the target project's files with the newer versions, preserving any project-specific customizations
+- Do NOT overwrite project-specific sections in CLAUDE.md, agent bodies, or skill customizations
 
 ---
 
@@ -22,11 +33,100 @@ Plus **13 operational skills** (color-coded protocols): BLUE (diagnostics), GREE
 
 ## Installation Procedure
 
-There are two installation modes. Read both and select the appropriate one.
+There are two installation modes. **Mode B is for non-git servers** (shorter, user-level install). **Mode A is for git repositories** (full project-level install with customization). Read both and select the appropriate one.
+
+---
+
+### Mode B: Install on a Non-Git Server (Hidden Installation)
+
+Use this when the target is a Linux server without git, or when the human wants the framework available without project-level files. Agents and skills go into the **user-level** `~/.claude/` directory (hidden in the home directory, applies to ALL projects for this user). Only `CLAUDE.md` and `.samantha/` go in the project directory.
+
+#### Key Differences from Mode A
+
+| Component | Mode B (User-Level) | Mode A (Git Repo) |
+|-----------|--------------------|--------------------|
+| Agents | `~/.claude/agents/` | `{project}/.claude/agents/` |
+| Skills | `~/.claude/skills/` | `{project}/.claude/skills/` |
+| Hooks | `~/.claude/settings.json` (merge) | `{project}/.claude/settings.local.json` |
+| CLAUDE.md | `{project}/CLAUDE.md` (unavoidable) | `{project}/CLAUDE.md` |
+| Memory | `{project}/.samantha/memory/` | `{project}/.samantha/memory/` |
+
+**Note**: `CLAUDE.md` MUST be in the project root — Claude Code requires this. It is a dotless file and will be visible in directory listings. There is no way to hide it. The `.samantha/` directory is a dotfile and is hidden by default on Linux/macOS (`ls` won't show it without `-a`).
+
+#### Step 1: Create user-level directories
+
+```bash
+mkdir -p ~/.claude/agents
+mkdir -p ~/.claude/skills/{gate,blue,green,gold,red,violet,amber,indigo,fix,commit,explain,review,ship}
+```
+
+#### Step 2: Copy agents to user-level
+
+Copy all 6 agent files from this repo's `.claude/agents/` to `~/.claude/agents/`. These will be available in ALL Claude Code sessions for this user.
+
+#### Step 3: Copy skills to user-level
+
+Copy all 13 SKILL.md files from this repo's `.claude/skills/*/SKILL.md` to `~/.claude/skills/*/SKILL.md`, preserving the subdirectory structure.
+
+#### Step 4: Merge hooks into global settings
+
+Read `~/.claude/settings.json` (it may already exist with other hooks). MERGE the Samantha hooks from this repo's `.claude/settings.local.json` into the global file.
+
+**Critical**: The python3 commands in the hooks reference `$CLAUDE_PROJECT_DIR`. This variable is set by Claude Code to the current project directory. The hooks will work correctly regardless of which project is active — they will look for `.samantha/memory/MEMORY.md` relative to whichever project directory Claude Code is running in.
+
+If `~/.claude/settings.json` already has hooks for the same events (e.g., `SessionStart`), ADD the Samantha hooks as additional entries in the hook arrays — do NOT replace existing hooks.
+
+#### Step 5: Set up the project directory
+
+In the target project directory (the one where Claude Code will run):
+
+```bash
+# Create the hidden Samantha directories
+mkdir -p .samantha/memory .samantha/plans .samantha/scratch
+
+# Create a clean memory file
+cat > .samantha/memory/MEMORY.md << 'MEMEOF'
+# Samantha's Memory
+
+*Last updated: {today's date}*
+
+## Session Notes
+
+- {today's date}: Framework installed (user-level). First session.
+
+## Agent Performance
+
+(No data yet.)
+
+## Project Decisions
+
+(No decisions yet.)
+
+## Patterns & Conventions
+
+(None discovered yet.)
+
+## Lessons Learned
+
+(None yet.)
+MEMEOF
+```
+
+#### Step 6: Copy CLAUDE.md to the project root
+
+Copy `CLAUDE.md` from this repo to the target project's root directory. This is the one file that cannot be hidden — Claude Code discovers it by name in the project root.
+
+Customize it with project-specific sections as described in Mode A, Step 6.
+
+#### Step 7: Verify
+
+Same as Mode A, Step 9.
+
+---
 
 ### Mode A: Install into a Git Repository (Recommended)
 
-Use this when the user says "install Samantha into this project" or when the target is a git-tracked codebase. Files go into the project's `.claude/` and `.samantha/` directories (hidden dotfiles, visible in git if committed).
+Use this when the human says "install Samantha into this project" or when the target is a git-tracked codebase. Files go into the project's `.claude/` and `.samantha/` directories (hidden dotfiles, visible in git if committed).
 
 #### Step 1: Read the source files
 
@@ -78,7 +178,11 @@ Copy each file preserving the directory structure. Do NOT copy `.git/` or this `
 
 #### Step 4: Clear the memory file
 
-Replace the contents of `.samantha/memory/MEMORY.md` with a clean skeleton:
+The MEMORY.md in this repo is a template with example entries and universally valuable Lessons Learned. For the target project, you have two options:
+
+**Option A — Keep the template**: Copy as-is. The example entries show the expected format, and the Lessons Learned section contains platform truths that apply to all projects. Replace the example entries with real data as the project progresses.
+
+**Option B — Start fresh**: Replace with a clean skeleton:
 
 ```markdown
 # Samantha's Memory
@@ -155,93 +259,6 @@ Start a new Claude Code session in the target project. Samantha should:
 
 ---
 
-### Mode B: Install on a Non-Git Server (Hidden Installation)
-
-Use this when the target is a Linux server without git, or when the user wants the framework available without visible files in the project directory. Files go into the **user-level** `~/.claude/` directory (hidden in the home directory, applies to ALL projects for this user).
-
-#### Key Difference from Mode A
-
-| Component | Mode A (Git Repo) | Mode B (Hidden/User-Level) |
-|-----------|-------------------|---------------------------|
-| Agents | `{project}/.claude/agents/` | `~/.claude/agents/` |
-| Skills | `{project}/.claude/skills/` | `~/.claude/skills/` |
-| Hooks | `{project}/.claude/settings.local.json` | `~/.claude/settings.json` (merge) |
-| CLAUDE.md | `{project}/CLAUDE.md` | `{project}/CLAUDE.md` (unavoidable) |
-| Memory | `{project}/.samantha/memory/` | `{project}/.samantha/memory/` |
-
-**Note**: `CLAUDE.md` MUST be in the project root — Claude Code requires this. It is a dotless file and will be visible in directory listings. There is no way to hide it. The `.samantha/` directory is a dotfile and is hidden by default on Linux/macOS (`ls` won't show it without `-a`).
-
-#### Step 1: Create user-level directories
-
-```bash
-mkdir -p ~/.claude/agents
-mkdir -p ~/.claude/skills/{gate,blue,green,gold,red,violet,amber,indigo,fix,commit,explain,review,ship}
-```
-
-#### Step 2: Copy agents to user-level
-
-Copy all 6 agent files from this repo's `.claude/agents/` to `~/.claude/agents/`. These will be available in ALL Claude Code sessions for this user.
-
-#### Step 3: Copy skills to user-level
-
-Copy all 13 SKILL.md files from this repo's `.claude/skills/*/SKILL.md` to `~/.claude/skills/*/SKILL.md`, preserving the subdirectory structure.
-
-#### Step 4: Merge hooks into global settings
-
-Read `~/.claude/settings.json` (it may already exist with other hooks). MERGE the Samantha hooks from this repo's `.claude/settings.local.json` into the global file.
-
-**Critical**: The python3 commands in the hooks reference `$CLAUDE_PROJECT_DIR`. This variable is set by Claude Code to the current project directory. The hooks will work correctly regardless of which project is active — they will look for `.samantha/memory/MEMORY.md` relative to whichever project directory Claude Code is running in.
-
-If `~/.claude/settings.json` already has hooks for the same events (e.g., `SessionStart`), ADD the Samantha hooks as additional entries in the hook arrays — do NOT replace existing hooks.
-
-#### Step 5: Set up the project directory
-
-In the target project directory (the one where Claude Code will run):
-
-```bash
-# Create the hidden Samantha directories
-mkdir -p .samantha/memory .samantha/plans .samantha/scratch
-
-# Create a clean memory file
-cat > .samantha/memory/MEMORY.md << 'MEMEOF'
-# Samantha's Memory
-
-*Last updated: {today's date}*
-
-## Session Notes
-
-- {today's date}: Framework installed (user-level). First session.
-
-## Agent Performance
-
-(No data yet.)
-
-## Project Decisions
-
-(No decisions yet.)
-
-## Patterns & Conventions
-
-(None discovered yet.)
-
-## Lessons Learned
-
-(None yet.)
-MEMEOF
-```
-
-#### Step 6: Copy CLAUDE.md to the project root
-
-Copy `CLAUDE.md` from this repo to the target project's root directory. This is the one file that cannot be hidden — Claude Code discovers it by name in the project root.
-
-Customize it with project-specific sections as described in Mode A, Step 6.
-
-#### Step 7: Verify
-
-Same as Mode A, Step 9.
-
----
-
 ## Post-Installation Notes
 
 ### What the user will see
@@ -298,3 +315,9 @@ Each agent `.md` file uses YAML frontmatter with these fields:
 ### Skill file naming
 
 Skills MUST be named `SKILL.md` (uppercase, exact match). Claude Code auto-discovers files at `.claude/skills/{name}/SKILL.md`. Other filenames (e.g., `prompt.md`, `skill.md`) will NOT be discovered.
+
+### Version history
+
+| Version | Date | Changes |
+|---------|------|---------|
+| 1.0.0 | 2026-03-29 | Initial release. 6 agents, 13 skills, hooks, memory system. Validated through 23 skeptic agents across 3 review rounds. |
