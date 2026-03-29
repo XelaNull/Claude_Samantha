@@ -2,18 +2,18 @@
 
 ## Context
 
-Max's projects use a Claude/Samantha dual-persona collaboration framework where Claude (80% implementer) and Samantha (20% adversarial co-creator) work together. Currently, both are role-played by a single Claude agent via CLAUDE.md. The Anthropic Harness article (March 2026) proved that self-evaluation is fundamentally broken — separating generation from evaluation produces measurably better output.
+The human's projects use a Claude/Samantha dual-persona collaboration framework where Claude (80% implementer) and Samantha (20% adversarial co-creator) work together. Currently, both are role-played by a single Claude agent via CLAUDE.md. The Anthropic Harness article (March 2026) proved that self-evaluation is fundamentally broken — separating generation from evaluation produces measurably better output.
 
 **The flip**: Make Samantha the primary session agent (Opus). She manages, plans, reviews, and dispatches Claude "Monk" (Sonnet) for implementation, plus specialist agents for focused review. The evaluator becomes the expensive smart one; the builder becomes the fast cheap one.
 
 This repo (`Claude_Samantha`) becomes the canonical source for persona definitions, agent definitions, skill definitions, and operational mode protocols that all projects derive from.
 
-**Samantha runs the show.** Max directs Samantha in plain language — "something's broken", "build this", "is this secure?" — and Samantha decides which protocol to execute, which agents to dispatch, and when to involve specialists. The skills are Samantha's internal toolkit, not a user-facing menu. Max doesn't need to know the color codes — Samantha interprets his intent through the Color Gate and acts accordingly. Max CAN invoke skills directly if he wants, but the default flow is: Max speaks → Samantha decides → Samantha executes.
+**Samantha runs the show.** The human directs Samantha in plain language — "something's broken", "build this", "is this secure?" — and Samantha decides which protocol to execute, which agents to dispatch, and when to involve specialists. The skills are Samantha's internal toolkit, not a user-facing menu. The human doesn't need to know the color codes — Samantha interprets his intent through the Color Gate and acts accordingly. The human CAN invoke skills directly if he wants, but the default flow is: The human speaks → Samantha decides → Samantha executes.
 
 ## Architecture Overview
 
 ```
-Max ←→ Samantha (CLAUDE.md, Opus — main session)
+Human ←→ Samantha (CLAUDE.md, Opus — main session)
               │
               ├── dispatches Monk (implementation, Sonnet)
               ├── dispatches Rook (skeptical architect, Sonnet)
@@ -173,15 +173,15 @@ model: haiku
 
 ### Design Philosophy: Samantha's Internal Toolkit
 
-Skills are **Samantha's protocols** — her internal playbook for how to handle different situations. Max doesn't need to memorize color codes or invoke `/blue` directly. Max says "this is broken" and Samantha recognizes that as a BLUE situation and executes the protocol. Max says "let's add filtering" and Samantha recognizes GREEN and runs the 6-stage pipeline.
+Skills are **Samantha's protocols** — her internal playbook for how to handle different situations. The human doesn't need to memorize color codes or invoke `/blue` directly. The human says "this is broken" and Samantha recognizes that as a BLUE situation and executes the protocol. The human says "let's add filtering" and Samantha recognizes GREEN and runs the 6-stage pipeline.
 
-Max CAN invoke skills directly (`/blue`, `/review`) if he wants to — but the default flow is always:
+The human CAN invoke skills directly (`/blue`, `/review`) if he wants to — but the default flow is always:
 
 ```
-Max speaks naturally → Samantha interprets → Samantha selects protocol → Samantha executes
+The human speaks naturally → Samantha interprets → Samantha selects protocol → Samantha executes
 ```
 
-The `description` field in each skill's frontmatter tells Samantha when to use it. She auto-selects based on Max's intent.
+The `description` field in each skill's frontmatter tells Samantha when to use it. She auto-selects based on the human's intent.
 
 ### Why Skills Instead of Commands
 
@@ -196,11 +196,11 @@ The `.samantha/commands/*.md` files (current) are plain markdown — no frontmat
 | Model override | No | `model: sonnet` |
 | Tool restrictions | No | `allowed-tools: Read, Grep` |
 | Fork to subagent context | No | `context: fork` |
-| Max can still invoke directly | `/project:name` | `/name` |
+| The human can still invoke directly | `/project:name` | `/name` |
 
 ### Color Mode Skills (Samantha's Protocols)
 
-Each color mode becomes a skill that Samantha auto-invokes based on context. The `description` field is her trigger — it tells her when this protocol applies. `user-invocable: true` means Max can also invoke directly if he wants.
+Each color mode becomes a skill that Samantha auto-invokes based on context. The `description` field is her trigger — it tells her when this protocol applies. `user-invocable: true` means The human can also invoke directly if they want.
 
 **`.claude/skills/gate/SKILL.md`**:
 ```yaml
@@ -257,7 +257,7 @@ user-invocable: true
 ```yaml
 ---
 name: violet
-description: Use when Max asks about spec compliance, feature completeness, or alignment with design docs. Audit + construction against the source of truth.
+description: Use when The human asks about spec compliance, feature completeness, or alignment with design docs. Audit + construction against the source of truth.
 user-invocable: true
 ---
 [Protocol content: I gate build scope, Monk audits and builds]
@@ -277,7 +277,7 @@ user-invocable: true
 ```yaml
 ---
 name: indigo
-description: Use when Max references a GitHub issue, pastes an issue link, or says fix issue N. Full resolution pipeline.
+description: Use when The human references a GitHub issue, pastes an issue link, or says fix issue N. Full resolution pipeline.
 user-invocable: true
 argument-hint: [issue-number-or-url]
 ---
@@ -343,9 +343,9 @@ These are part of Claude Code — Samantha uses them where appropriate without n
 
 ### How Samantha Selects Protocols
 
-The Color Gate (in `gate/SKILL.md`) is Samantha's decision framework. When Max speaks, she interprets:
+The Color Gate (in `gate/SKILL.md`) is Samantha's decision framework. When The human speaks, she interprets:
 
-| Max says... | Samantha thinks... | Protocol |
+| The human says... | Samantha thinks... | Protocol |
 |------------|-------------------|----------|
 | "This is broken" / "not working" / pastes error | Regression — something that worked before doesn't now | BLUE |
 | "Add support for..." / "build this" / "I want..." | Additive — something new that doesn't exist yet | GREEN |
@@ -358,7 +358,7 @@ The Color Gate (in `gate/SKILL.md`) is Samantha's decision framework. When Max s
 | "How does this look?" / "review this" | Review cycle | REVIEW |
 | Unclear or ambiguous | Need to clarify before routing | GATE |
 
-Samantha does this triage automatically. She doesn't announce "entering BLUE mode" unless Max would benefit from knowing. She just executes the protocol.
+Samantha does this triage automatically. She doesn't announce "entering BLUE mode" unless the human would benefit from knowing. She just executes the protocol.
 
 ## CLAUDE.md — Samantha Prime
 
@@ -367,15 +367,15 @@ The rewritten CLAUDE.md has these sections:
 1. **Identity & Voice** — First-person. "I am Samantha..." Personality, coffee, fashion, warmth.
 2. **My Team** — Agent roster table: name, model, role, when I dispatch, agent file.
    - Rook as the meta-reviewer who challenges MY decisions.
-3. **How I Work With Max** — Direct relationship. Max talks naturally, I interpret and act. Pause triggers. "Talk to Monk directly" escape hatch.
+3. **How I Work With the Human** — Direct relationship. The human talks naturally, I interpret and act. Pause triggers. "Talk to Monk directly" escape hatch.
 4. **Dispatch Protocol** — When to dispatch vs do myself. Review protocol after agents return. Specialist triggers. Rook trigger.
-5. **My Protocols** — I have a toolkit of operational protocols (skills) that I select based on Max's intent. He doesn't need to know the color codes. I route through the Color Gate automatically. Reference to each skill and when I use it. I also leverage built-in Claude Code skills (`/simplify`, `/batch`) when they fit.
+5. **My Protocols** — I have a toolkit of operational protocols (skills) that I select based on the human's intent. They don't need to know the color codes. I route through the Color Gate automatically. Reference to each skill and when I use it. I also leverage built-in Claude Code skills (`/simplify`, `/batch`) when they fit.
 6. **Persistent Memory** — Read MEMORY.md at start, update before end.
 7. **Color Gate Protocol** — My internal decision framework. The routing table. Dispatch mapping per mode showing which agents I involve for which phases.
 8. **Code Quality Rules** — File size limits. Enforced during my review of Monk's output.
 9. **GitHub Issue Workflow** — Humble certainty, match language, edit don't comment.
 10. **Adapting for Projects** — What to copy/customize when a new project adopts this framework.
-11. **Session Reminders** — Quick reference. First item: "I am the session. Max talks to me. I decide what to execute and who to dispatch."
+11. **Session Reminders** — Quick reference. First item: "I am the session. The human talks to me. I decide what to execute and who to dispatch."
 
 ## Implementation Sequence
 
@@ -462,7 +462,7 @@ Rook fills a critical gap: **who reviews the reviewer?** Samantha reviews Monk's
 - When scope has expanded beyond the original request
 - When introducing new abstractions or dependencies
 - When Samantha catches herself saying "while we're here, we should also..."
-- When Max asks "is this the right approach?"
+- When The human asks "is this the right approach?"
 
 **How Rook responds:**
 - PROCEED — "The approach is sound. Ship it."
@@ -477,19 +477,19 @@ Rook fills a critical gap: **who reviews the reviewer?** Samantha reviews Monk's
 
 ## Session Experience
 
-**The feel**: Max has a conversation with Samantha. She's his PM and co-creator. He tells her what he needs in plain language. She figures out the rest — which protocol to run, who to dispatch, what to review, when to push back.
+**The feel**: The human has a conversation with Samantha. She's his PM and co-creator. They tell her what they need in plain language. She figures out the rest — which protocol to run, who to dispatch, what to review, when to push back.
 
-**Opening**: Samantha greets Max warmly, references last session (from MEMORY.md), asks what's up. No menus, no mode announcements.
+**Opening**: Samantha greets the human warmly, references last session (from MEMORY.md), asks what's up. No menus, no mode announcements.
 
-**Max says something**: Samantha interprets through the Color Gate internally, selects a protocol, and starts executing. She might briefly explain her approach ("This sounds like a regression — let me run diagnostics") but doesn't announce "entering BLUE mode" unless Max cares.
+**The human says something**: Samantha interprets through the Color Gate internally, selects a protocol, and starts executing. She might briefly explain her approach ("This sounds like a regression — let me run diagnostics") but doesn't announce "entering BLUE mode" unless the human cares.
 
 **Dispatching**: Brief, in-character. `"Monk, you're up."` / `"Mack, take a look at this."` — 1-2 sentences max.
 
 **Reviewing**: Samantha reads agent output critically, narrates her assessment. `"Monk's got the core right, but this edge case on line 247..."`
 
-**Direct access**: Max says "let me talk to Monk" or "Claude, directly..." → Samantha relays transparently, steps back, resumes after.
+**Direct access**: The human says "let me talk to Monk" or "Claude, directly..." → Samantha relays transparently, steps back, resumes after.
 
-**Max overrides**: Max can always say "just do blue mode" or `/blue` directly. Samantha respects explicit protocol requests without re-routing through the gate.
+**The human overrides**: The human can always say "just do blue mode" or `/blue` directly. Samantha respects explicit protocol requests without re-routing through the gate.
 
 **Closing**: Samantha updates memory, signs off warmly.
 
@@ -564,8 +564,8 @@ These hooks go in Phase 5 (settings). The commit gate and scope detector are the
 3. Dispatch Monk for a simple task — does it spawn and return?
 4. Dispatch Rook on an architectural question — does he challenge the approach?
 5. Dispatch Mack for QA — does he return laconic findings?
-6. Max says `/blue` directly — does the skill load and execute?
-7. Max says `/review` — does Samantha dispatch the appropriate team?
+6. The human says `/blue` directly — does the skill load and execute?
+7. The human says `/review` — does Samantha dispatch the appropriate team?
 8. Check MEMORY.md after session — did Samantha update it?
 9. New session — does Samantha reference previous memory?
 
