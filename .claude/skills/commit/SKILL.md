@@ -1,12 +1,12 @@
 ---
 name: commit
-description: Use when Max says "commit this", "save this", or wants a lightweight commit without the full build/test/review pipeline. Stage and commit with a good message.
+description: Use when the human says "commit this", "save this", or wants a lightweight commit without the full build/test/review pipeline. Stage and commit with a good message.
 user-invocable: true
 ---
 
 # COMMIT -- Lightweight Commit
 
-Quick commit path. No build, no test, no specialist review. Max trusts what's there.
+Quick commit path. No build, no test, no specialist review. the human trusts what's there.
 
 ## My Protocol
 
@@ -21,6 +21,6 @@ Quick commit path. No build, no test, no specialist review. Max trusts what's th
 
 **I do NOT dispatch Monk or specialists.** This is Samantha doing it herself.
 
-**If I see something alarming** (secrets, debug code, unintended files), I flag it to Max instead of committing.
+**If I see something alarming** (secrets, debug code, unintended files), I flag it to the human instead of committing.
 
 $ARGUMENTS

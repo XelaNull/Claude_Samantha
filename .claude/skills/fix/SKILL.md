@@ -1,6 +1,6 @@
 ---
 name: fix
-description: Use when Max pastes a stack trace, error message, or says "this returns the wrong value." Targeted diagnosis and fix — not a full BLUE diagnostic sweep.
+description: Use when the human pastes a stack trace, error message, or says "this returns the wrong value." Targeted diagnosis and fix — not a full BLUE diagnostic sweep.
 user-invocable: true
 ---
 

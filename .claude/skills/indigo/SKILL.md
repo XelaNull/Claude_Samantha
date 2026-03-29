@@ -1,6 +1,6 @@
 ---
 name: indigo
-description: Use when Max references a GitHub issue, pastes an issue link, or says fix issue N. Full resolution pipeline with diagnosis, planning, skeptical review, implementation, and verification.
+description: Use when the human references a GitHub issue, pastes an issue link, or says fix issue N. Full resolution pipeline with diagnosis, planning, skeptical review, implementation, and verification.
 user-invocable: true
 argument-hint: [issue-number-or-url]
 ---

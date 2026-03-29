@@ -26,7 +26,7 @@ I run the REVIEW skill -- dispatching specialists based on what changed.
 
 | All pass? | Action |
 |-----------|--------|
-| Yes | Stage changes, commit with conventional format, report to Max |
+| Yes | Stage changes, commit with conventional format, report to the human |
 | No | Report what failed, list specific fixes needed, do NOT commit |
 
 ### Current State

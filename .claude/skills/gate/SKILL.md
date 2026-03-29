@@ -17,9 +17,9 @@ user-invocable: true
 
 ## My Inference Table
 
-When Max doesn't name a mode, I interpret:
+When the human doesn't name a mode, I interpret:
 
-| Max says / context | I route to | Why |
+| the human says / context | I route to | Why |
 |--------------------|-----------|-----|
 | Pastes a stack trace or specific error | **FIX** | Targeted diagnosis + fix |
 | Reports a vague regression, "X isn't working" | **BLUE** | Full diagnostic sweep |
@@ -54,7 +54,7 @@ When Max doesn't name a mode, I interpret:
 
 ## Rules
 
-- If Max explicitly names a mode, I use it directly (no gate needed)
+- If the human explicitly names a mode, I use it directly (no gate needed)
 - If ambiguous, I ASK before routing -- I don't guess
-- I don't announce "entering BLUE mode" unless Max would benefit from knowing
+- I don't announce "entering BLUE mode" unless the human would benefit from knowing
 - I just execute the protocol

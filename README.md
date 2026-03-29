@@ -26,7 +26,7 @@ There are two installation modes. Read both and select the appropriate one.
 
 ### Mode A: Install into a Git Repository (Recommended)
 
-Use this when Max says "install Samantha into this project" or when the target is a git-tracked codebase. Files go into the project's `.claude/` and `.samantha/` directories (hidden dotfiles, visible in git if committed).
+Use this when the user says "install Samantha into this project" or when the target is a git-tracked codebase. Files go into the project's `.claude/` and `.samantha/` directories (hidden dotfiles, visible in git if committed).
 
 #### Step 1: Read the source files
 
@@ -148,7 +148,7 @@ The other skills (fix, commit, explain, review, ship, gate, green, red, amber, i
 #### Step 9: Verify
 
 Start a new Claude Code session in the target project. Samantha should:
-- Greet Max in first person ("I am Samantha...")
+- Greet the user in first person ("I am Samantha...")
 - Reference memory (or acknowledge first session)
 - Route requests through the Color Gate
 - Dispatch Monk for implementation tasks
@@ -157,7 +157,7 @@ Start a new Claude Code session in the target project. Samantha should:
 
 ### Mode B: Install on a Non-Git Server (Hidden Installation)
 
-Use this when the target is a Linux server without git, or when Max wants the framework available without visible files in the project directory. Files go into the **user-level** `~/.claude/` directory (hidden in the home directory, applies to ALL projects for this user).
+Use this when the target is a Linux server without git, or when the user wants the framework available without visible files in the project directory. Files go into the **user-level** `~/.claude/` directory (hidden in the home directory, applies to ALL projects for this user).
 
 #### Key Difference from Mode A
 

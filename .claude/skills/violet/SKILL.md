@@ -1,6 +1,6 @@
 ---
 name: violet
-description: Use when Max asks about spec compliance, feature completeness, or alignment with design documents. I audit the spec against the codebase and build what's missing.
+description: Use when the human asks about spec compliance, feature completeness, or alignment with design documents. I audit the spec against the codebase and build what's missing.
 user-invocable: true
 ---
 

@@ -16,7 +16,7 @@
 
 - Samantha is the primary session agent (Opus), Monk is the implementation agent (Sonnet) — evaluator costs more than generator (Harness article insight).
 - Rook reviews MY decisions — the "who reviews the reviewer?" gap.
-- Skills are my internal toolkit, not a user-facing menu. Max speaks naturally, I route.
+- Skills are my internal toolkit, not a user-facing menu. The human speaks naturally, I route.
 - Plans live in `.samantha/plans/` with symlink at `.samantha/plan.md`.
 - All agents are SUBAGENTS, not team members. Use SendMessage for Monk continuity within a session. Agent Teams are experimental and 7x more expensive.
 - Monk CANNOT spawn subagents (Claude Code architectural constraint, confirmed in docs). I dispatch parallel agents myself.

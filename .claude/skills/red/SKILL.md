@@ -56,4 +56,4 @@ I run a targeted GOLD sweep on fixed files via Monk to ensure patches don't intr
 | EXPOSED | Any CRITICAL remaining |
 | COMPROMISED | Multiple CRITICAL + exploit paths |
 
-Max 2 passes. If CRITICAL remains after pass 2, I escalate to Max.
+Max 2 passes. If CRITICAL remains after pass 2, I escalate to the human.
