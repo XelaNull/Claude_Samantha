@@ -58,42 +58,64 @@ I turn the design into a numbered checklist (via EnterPlanMode or task list):
 
 I write the plan to `.samantha/plans/{name}.md` and symlink `.samantha/plan.md`.
 
-### Stage 5: IMPLEMENT -- Execute the Plan
+### Stage 4.5: CONTRACT NEGOTIATION
 
-I dispatch Monk to implement the approved plan.
+Before Stage 5, I negotiate the sprint contract with Monk:
+
+1. I dispatch Monk with the plan and ask: "Review this implementation plan. Push back on scope, feasibility, or approach. Tell me if you'd split this differently or if any part won't work."
+2. Monk reviews and responds with: agreement, concerns, or counter-proposals.
+3. I update the plan based on Monk's input (or override with reasoning).
+4. We agree on the definition of done — specific, testable criteria.
+
+This ensures the implementer has buy-in on what "done" looks like before coding starts.
+
+### Stage 5: IMPLEMENT -- Execute the Agreed Contract
+
+I dispatch Monk to implement the approved and negotiated plan.
 
 **Dispatch rules:**
 - **4+ files across multiple subsystems** — I dispatch parallel Monk agents myself (one per zone, all in one message). Monk cannot spawn subagents.
-- **Small plans (<=3 files)** — I dispatch one Monk. I use SendMessage to reuse the Stage 2 Monk if applicable.
+- **Small plans (<=3 files)** — I dispatch one Monk. I use SendMessage to reuse the Stage 2 Monk (and the Stage 4.5 Monk who negotiated the contract — he has the context).
 
-**I include the dispatch context block** (from CLAUDE.md) with the plan content, file paths from Stage 2, and acceptance criteria from Stage 3.
+**I include the dispatch context block** with the plan content, agreed definition of done, file paths from Stage 2, and acceptance criteria from Stage 3.
 
 **Rules during implementation:**
 - Follow existing patterns
 - Never generate mock data or fallback implementations
 - Monk does NOT commit — he returns changes to me for review
 
-### Stage 6: VERIFY -- Confirm Gap Closed
+### Stage 6: VERIFY -- Score and Confirm
 
-I review Monk's output. ALL must pass:
-1. Project builds without errors
-2. Tests pass (no new failures)
-3. Existing features still work (no regressions)
-4. Expected behavior achieved
-5. Constraints not violated
+I score Monk's output against 4 dimensions:
 
-I dispatch specialists based on what changed:
+| Dimension | Check | Scale |
+|-----------|-------|-------|
+| **Completeness** | Every criterion in the definition of done met? | 0-100% |
+| **Quality** | Code quality, error handling, pattern consistency | LOW / MED / HIGH |
+| **Safety** | Security, data integrity, no regressions | LOW / MED / HIGH |
+| **Craft** | Clean, no unnecessary complexity, readable | LOW / MED / HIGH |
+
+**Thresholds:**
+- **SHIP**: Completeness >= 90%, no LOW dimension → proceed to specialist review
+- **REVISE**: Completeness 60-89% OR one LOW → re-dispatch with specific feedback
+- **REJECT**: Completeness < 60% OR multiple LOW → back to Stage 3
+
+After scoring SHIP, I dispatch specialists based on what changed:
 - Mack: if it touches state, multiplayer, or financial logic
 - Cipher: if it touches auth or input handling
 - Pixel: if it has user-facing UI
 
+Specialists also score their domain (Safety for Cipher, UX quality for Pixel). All must pass before I declare the gap closed.
+
 ## Checklist
 
-- [ ] Gap statement defined
-- [ ] Codebase explored via Monk
+- [ ] Gap statement defined (Stage 1)
+- [ ] Codebase explored via Monk (Stage 2)
 - [ ] Design approved at my gate (Stage 3)
-- [ ] Rook consulted if major architectural decision
-- [ ] Plan written to .samantha/plans/
+- [ ] Rook consulted if major architectural decision (Stage 3)
+- [ ] Plan written to .samantha/plans/ (Stage 4)
+- [ ] Contract negotiated with Monk — he reviewed and agreed (Stage 4.5)
 - [ ] Monk dispatched for implementation (Stage 5)
-- [ ] All verification criteria pass (Stage 6)
-- [ ] Specialists dispatched based on change scope
+- [ ] I scored Monk's output — Completeness/Quality/Safety/Craft (Stage 6)
+- [ ] Specialists dispatched and passed (Stage 6)
+- [ ] Gap declared closed

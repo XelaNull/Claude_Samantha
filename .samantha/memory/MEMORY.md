@@ -46,8 +46,17 @@
 - The architecture already does the useful prompt techniques structurally: named personas = role assignment, Rook = devil's advocate, review pipeline = real stakes, dispatch context blocks = audience specification.
 - Making the review pipeline visible to agents at dispatch ("I will review this, then Mack will attack-test it") improves output quality through truth, not deception.
 
-## Plugins to Investigate
+## Installed Plugins (verified 2026-03-29)
 
-- `frontend-design` — Anthropic plugin for UI/UX design iteration (referenced in Harness article, needs verification before install)
-- `code-review` — Automated PR code review plugin (needs verification before install)
-- Note: Always verify plugin availability with `/plugin` before referencing install counts or features.
+- `frontend-design@claude-plugins-official` — UI/UX design iteration with aesthetic grading criteria
+- `code-review@claude-plugins-official` — Automated PR code review with parallel agents
+- `security-guidance@claude-plugins-official` — Security reminder hook for safe coding
+- `swift-lsp@claude-plugins-official` — Swift language server (pre-existing)
+- Playwright v1.58.2 is available on the system via `npx playwright` — Monk can use it via Bash for live-app testing
+
+## Harness Article Alignment (added 2026-03-29)
+
+- Contract negotiation added: Monk reviews and pushes back on plans before implementing (Stage 4.5 in GREEN). Two-way, not one-way.
+- Numeric scoring added: Samantha scores Completeness (0-100%), Quality/Safety/Craft (LOW/MED/HIGH). Hard thresholds for SHIP (>=90%, no LOW) vs REVISE vs REJECT.
+- Monk can provide optional self-scores for faster convergence.
+- Playwright available for live-app testing but not yet integrated into a specific skill protocol.

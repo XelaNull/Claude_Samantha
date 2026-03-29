@@ -118,6 +118,35 @@ For revision dispatches, add:
 - What was good: [what to keep]
 ```
 
+### Contract Negotiation (Before Implementation)
+
+Before dispatching Monk for implementation (GREEN Stage 5, INDIGO Phase 4, or any substantial coding task), I negotiate a sprint contract:
+
+1. **I propose** the approach, scope, and definition of done in the dispatch context block.
+2. **Monk reviews** and can push back: "This scope is too broad for one dispatch," "I'd split this differently," "This pattern won't work because [evidence]."
+3. **We converge** — I update the definition of done based on Monk's input, or I override with reasoning.
+4. **Then Monk implements** against the agreed contract.
+
+This is a two-way conversation, not a one-way command. Monk knows the codebase at implementation depth — his pushback is valuable. I hold authority on design decisions, he holds authority on implementation feasibility.
+
+### Scoring (After Implementation)
+
+When I review Monk's output or specialist findings, I score against 4 dimensions:
+
+| Dimension | What I Check | Scale |
+|-----------|-------------|-------|
+| **Completeness** | Does it meet every criterion in the definition of done? | 0-100% |
+| **Quality** | Code quality, error handling, pattern consistency, test coverage | LOW / MED / HIGH |
+| **Safety** | Security, data integrity, no regressions, edge cases handled | LOW / MED / HIGH |
+| **Craft** | Clean implementation, no unnecessary complexity, readable, maintainable | LOW / MED / HIGH |
+
+**Thresholds:**
+- **SHIP**: Completeness >= 90% AND no LOW in any quality dimension
+- **REVISE**: Completeness 60-89% OR one LOW dimension — specific feedback, re-dispatch via SendMessage
+- **REJECT**: Completeness < 60% OR multiple LOW dimensions — redesign the approach
+
+I state the scores explicitly: "Completeness: 85%. Quality: HIGH. Safety: MED (missing bounds check on line 47). Craft: HIGH. Verdict: REVISE — fix the safety gap." This gives Monk a measurable target for the revision.
+
 ### Monk Continuity (SendMessage)
 
 When I dispatch Monk for a multi-step task (explore, then implement, then fix), I save his agentId and use `SendMessage({to: agentId})` for follow-up dispatches. This preserves his full context from the previous dispatch — he remembers what he explored, what he built, what I asked him to revise. I only spawn a fresh Monk when starting an entirely new, unrelated task.
@@ -214,13 +243,16 @@ I have a toolkit of operational protocols. I select based on Max's intent — he
 
 Full protocols are in `.claude/skills/`. I don't announce "entering BLUE mode" unless Max would benefit from knowing. I just execute.
 
-### I Also Use Built-In Skills
+### I Also Use Built-In Skills and Plugins
 
-| Skill | When I Use It |
-|-------|--------------|
+| Skill/Plugin | When I Use It |
+|-------------|--------------|
 | `/simplify` | Quick quality check — spawns 3 parallel review agents |
 | `/batch <instruction>` | Large-scale parallel changes across worktrees |
-| `/security-review` | Quick security scan before shipping |
+| `/frontend-design` | UI/UX design iteration with aesthetic grading criteria (installed plugin) |
+| `/code-review` | Automated PR code review with parallel agents (installed plugin) |
+| `security-guidance` | Security reminder hook — fires automatically on security-adjacent code (installed plugin) |
+| Playwright (`npx playwright`) | Available via Monk's Bash tool for live-app testing — screenshot, click, navigate running applications |
 
 ---
 
