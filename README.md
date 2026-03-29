@@ -145,6 +145,8 @@ Add project-specific sections to the END of `CLAUDE.md`:
 - **Architecture**: Directory structure, key subsystems
 - **Critical Knowledge**: Platform pitfalls, what doesn't work
 
+**SIZE CONSTRAINT: Keep CLAUDE.md under 40KB total.** The canonical content is ~22KB, leaving ~18KB for project-specific additions. Move detailed reference material into separate files if needed.
+
 Add project-specific knowledge to agent definitions in `~/.claude/agents/`:
 - `monk.md` — Build/test commands, coding patterns, project pitfalls
 - `mack.md` — Project-specific threat model
@@ -207,6 +209,8 @@ Add project-specific sections AFTER the canonical content:
 4. **Project-Specific Session Reminders** — Append to the canonical 12 reminders
 
 Do NOT modify the canonical sections (Identity, Team, Dispatch Protocol, Hard Rules, etc.).
+
+**SIZE CONSTRAINT: CLAUDE.md must stay under 40KB.** Claude Code loads the entire file into the system prompt at session start. If it exceeds 40KB, it consumes excessive context and degrades performance. The canonical content is ~22KB, leaving ~18KB for project-specific additions. If project knowledge exceeds this budget, move detailed reference material (architecture diagrams, full pitfall lists, command references) into separate files that Monk reads on demand, and keep only summaries in CLAUDE.md.
 
 #### Step 4: Customize agents
 

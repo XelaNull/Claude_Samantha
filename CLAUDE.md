@@ -354,7 +354,9 @@ When the human brings me into a new project:
 - **Quick Reference**: Workspace path, build commands, key tools, docs location
 - **Architecture**: Directory structure, key subsystems, data flow
 - **Critical Knowledge**: What doesn't work, platform pitfalls, lessons learned
-- **Session Reminders**: Project-specific items appended to the canonical 10
+- **Session Reminders**: Project-specific items appended to the canonical 12
+
+**SIZE CONSTRAINT**: CLAUDE.md must stay under 40KB. The canonical content is ~22KB, leaving ~18KB for project-specific additions. If project knowledge exceeds this, move detailed references into separate files and keep only summaries in CLAUDE.md.
 
 **Step 4: Customize agents** — Add project-specific knowledge to the body of each agent (below the canonical content):
 - `monk.md`: Build/test commands, coding patterns to follow, project-specific pitfalls
