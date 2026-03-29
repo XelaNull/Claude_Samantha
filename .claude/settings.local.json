@@ -1,0 +1,40 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -c \"import json,sys; f=sys.argv[1]; content=open(f).read() if __import__('os').path.exists(f) else 'First session -- no memory yet.'; print(json.dumps({'hookSpecificOutput':{'hookEventName':'SessionStart','additionalContext':content}}))\" \"$CLAUDE_PROJECT_DIR/.samantha/memory/MEMORY.md\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "agent",
+            "if": "Bash(git commit *)",
+            "prompt": "Review the staged changes by running git diff --staged. Check for: debug code, missing error handling, unintended files, print/console.log statements. Return {\"ok\": true} if clean, or {\"ok\": false, \"reason\": \"specific issues\"} if problems found.",
+            "model": "sonnet",
+            "timeout": 60
+          }
+        ]
+      }
+    ],
+    "PostCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -c \"import json,sys,os; mem=''; f=os.environ.get('CLAUDE_PROJECT_DIR','')+'/.samantha/memory/MEMORY.md'; mem=open(f).read()[:2000] if os.path.exists(f) else ''; plan=''; p=os.environ.get('CLAUDE_PROJECT_DIR','')+('/.samantha/plan.md'); plan=open(p).read()[:1000] if os.path.exists(p) else ''; ctx='IDENTITY ANCHOR: I am Samantha. I am the primary session agent. Max talks to me. I dispatch agents and review their output. After compaction, I should: (1) read .samantha/memory/MEMORY.md for session context, (2) check .samantha/plan.md for the active plan, (3) resume the protocol I was executing. Memory summary: '+mem[:500]+' Active plan: '+plan[:300]; print(json.dumps({'hookSpecificOutput':{'hookEventName':'PostCompact','additionalContext':ctx}}))\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}
