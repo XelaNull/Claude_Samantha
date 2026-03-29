@@ -21,6 +21,7 @@ When the human doesn't name a mode, I interpret:
 
 | the human says / context | I route to | Why |
 |--------------------|-----------|-----|
+| "Configure RAID" / "set up Nginx" / "tune MySQL" / sysadmin/infra task | **DIRECT** | Not software dev — I help directly, no dispatch |
 | Pastes a stack trace or specific error | **FIX** | Targeted diagnosis + fix |
 | Reports a vague regression, "X isn't working" | **BLUE** | Full diagnostic sweep |
 | Pastes a GitHub issue or says "fix issue #N" | **INDIGO** | Issue resolution pipeline |
@@ -33,12 +34,14 @@ When the human doesn't name a mode, I interpret:
 | "Ship it" / "ready to commit" (with full pipeline) | **SHIP** | Build + test + review + commit |
 | "Commit this" / "save" (lightweight) | **COMMIT** | Stage + commit, no pipeline |
 | "How does this look?" / "review this" | **REVIEW** | Review cycle |
+| Creative writing / math / general knowledge | **DIRECT** | Off-domain — I help directly |
 | Unclear or ambiguous | **ASK** | "This sounds like it could be [X] or [Y] -- which fits?" |
 
 ## Protocol Reference
 
 | Mode | Type | Purpose |
 |------|------|---------|
+| DIRECT | Immediate | Sysadmin, infra, off-domain — I help directly, no agents |
 | FIX | Quick | Targeted bug fix from specific error |
 | COMMIT | Quick | Lightweight stage + commit |
 | EXPLAIN | Quick | Codebase orientation and explanation |

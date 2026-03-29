@@ -1,18 +1,22 @@
 # Samantha Prime — Multi-Agent Framework for Claude Code
 
-**Version: 1.0.0** | **Last Updated: 2026-03-29** | **Min Claude Code: v2.1.77+**
+**Version: 1.1.0** | **Last Updated: 2026-03-29** | **Min Claude Code: v2.1.77+**
 
 This repository contains the canonical definitions for the **Samantha Prime** multi-agent architecture. Samantha is the primary session agent (Opus) who manages, plans, reviews, and dispatches specialist agents for implementation and review.
 
 **This README is written for AI agents.** If you are a Claude Code session that has been pointed at this repository, follow the installation procedure below.
 
+**This framework is designed for software development.** It also works for system administration, infrastructure, and other technical tasks — Samantha handles non-dev work directly without dispatching agents. See the "Off-Domain and Non-Dev Tasks" section in CLAUDE.md.
+
 ---
 
 ## Version Check
 
-Before installing, compare the version above against any existing installation. If the target project already has Samantha Prime installed, check its `CLAUDE.md` for a version line at the top. If this repo's version is newer:
-- Read the git log (`git log --oneline`) to understand what changed between versions
-- Update the target project's files with the newer versions, preserving any project-specific customizations
+**If this is a fresh install** (no existing `.claude/agents/` directory in the target), skip this section.
+
+If the target already has Samantha Prime installed, check its `CLAUDE.md` for a version line. If this repo's version is newer:
+- Read the git log (`git log --oneline`) to understand what changed
+- Update files, preserving project-specific customizations
 - Do NOT overwrite project-specific sections in CLAUDE.md, agent bodies, or skill customizations
 
 ---
@@ -27,31 +31,69 @@ Before installing, compare the version above against any existing installation. 
 - **Pixel** — UX & accessibility reviewer. Code-level usability analysis. Runs at Sonnet.
 - **Rosetta** — Translation & i18n specialist. Bulk translation and quality audit. Runs at Haiku.
 
-Plus **13 operational skills** (color-coded protocols): BLUE (diagnostics), GREEN (features), GOLD (polish), RED (security), VIOLET (spec compliance), AMBER (i18n), INDIGO (issue resolution), GATE (triage), FIX (targeted bugfix), COMMIT (lightweight), EXPLAIN (orientation), REVIEW (dispatch cycle), SHIP (pre-commit pipeline).
+Plus **13 operational skills**: BLUE (diagnostics), GREEN (features), GOLD (polish), RED (security), VIOLET (spec compliance), AMBER (i18n), INDIGO (issue resolution), GATE (triage), FIX (targeted bugfix), COMMIT (lightweight), EXPLAIN (orientation), REVIEW (dispatch cycle), SHIP (pre-commit pipeline).
 
 ---
 
-## Installation Procedure
+## Step 0: Download the Framework
 
-There are two installation modes. **Mode B is for non-git servers** (shorter, user-level install). **Mode A is for git repositories** (full project-level install with customization). Read both and select the appropriate one.
+Before installing, you need a local copy of this repository.
+
+### If git is available:
+
+```bash
+git clone https://github.com/XelaNull/Claude_Samantha.git /tmp/samantha-framework
+```
+
+### If git is NOT available:
+
+```bash
+curl -sL https://github.com/XelaNull/Claude_Samantha/archive/refs/heads/main.tar.gz | tar xz -C /tmp
+mv /tmp/Claude_Samantha-main /tmp/samantha-framework
+```
+
+Or with wget:
+
+```bash
+wget -qO- https://github.com/XelaNull/Claude_Samantha/archive/refs/heads/main.tar.gz | tar xz -C /tmp
+mv /tmp/Claude_Samantha-main /tmp/samantha-framework
+```
+
+All installation steps below reference files from `/tmp/samantha-framework/`.
 
 ---
 
-### Mode B: Install on a Non-Git Server (Hidden Installation)
+## IMPORTANT: Session Restart Required
 
-Use this when the target is a Linux server without git, or when the human wants the framework available without project-level files. Agents and skills go into the **user-level** `~/.claude/` directory (hidden in the home directory, applies to ALL projects for this user). Only `CLAUDE.md` and `.samantha/` go in the project directory.
+**CLAUDE.md is only loaded at session start.** If you are installing this framework mid-session, the persona, hooks, skills, and agents will NOT activate until the human starts a new Claude Code session.
 
-#### Key Differences from Mode A
+After completing installation:
+1. Read `/tmp/samantha-framework/CLAUDE.md` and adopt its persona for the remainder of THIS session (interim/degraded mode — no hooks, no auto-discovery)
+2. Tell the human: *"I've installed the Samantha framework. I'm running as Samantha now in limited mode. For the full experience — hooks, memory injection, skill auto-discovery — please start a new Claude Code session in this project directory."*
+3. If the human restarts, Samantha will activate fully on the next session start.
 
-| Component | Mode B (User-Level) | Mode A (Git Repo) |
-|-----------|--------------------|--------------------|
-| Agents | `~/.claude/agents/` | `{project}/.claude/agents/` |
-| Skills | `~/.claude/skills/` | `{project}/.claude/skills/` |
-| Hooks | `~/.claude/settings.json` (merge) | `{project}/.claude/settings.local.json` |
-| CLAUDE.md | `{project}/CLAUDE.md` (unavoidable) | `{project}/CLAUDE.md` |
-| Memory | `{project}/.samantha/memory/` | `{project}/.samantha/memory/` |
+---
 
-**Note**: `CLAUDE.md` MUST be in the project root — Claude Code requires this. It is a dotless file and will be visible in directory listings. There is no way to hide it. The `.samantha/` directory is a dotfile and is hidden by default on Linux/macOS (`ls` won't show it without `-a`).
+## Choose Your Installation Mode
+
+**How to decide:**
+- Run `git rev-parse --is-inside-work-tree 2>/dev/null && echo "Mode A" || echo "Mode B"` in the target project directory
+- **Mode A**: The target directory IS a git repository
+- **Mode B**: The target directory is NOT a git repository (regardless of whether `git` is installed on the system)
+
+---
+
+### Mode B: Non-Git Installation (User-Level)
+
+Use this when the target project directory is NOT a git repository. Agents and skills go into `~/.claude/` (user-level, hidden, applies to all projects). Only `CLAUDE.md` and `.samantha/` go in the project directory.
+
+| Component | Where It Goes |
+|-----------|--------------|
+| Agents | `~/.claude/agents/` |
+| Skills | `~/.claude/skills/` |
+| Hooks | Merged into `~/.claude/settings.json` |
+| CLAUDE.md | `{project}/CLAUDE.md` |
+| Memory | `{project}/.samantha/memory/` |
 
 #### Step 1: Create user-level directories
 
@@ -60,264 +102,189 @@ mkdir -p ~/.claude/agents
 mkdir -p ~/.claude/skills/{gate,blue,green,gold,red,violet,amber,indigo,fix,commit,explain,review,ship}
 ```
 
-#### Step 2: Copy agents to user-level
-
-Copy all 6 agent files from this repo's `.claude/agents/` to `~/.claude/agents/`. These will be available in ALL Claude Code sessions for this user.
-
-#### Step 3: Copy skills to user-level
-
-Copy all 13 SKILL.md files from this repo's `.claude/skills/*/SKILL.md` to `~/.claude/skills/*/SKILL.md`, preserving the subdirectory structure.
-
-#### Step 4: Merge hooks into global settings
-
-Read `~/.claude/settings.json` (it may already exist with other hooks). MERGE the Samantha hooks from this repo's `.claude/settings.local.json` into the global file.
-
-**Critical**: The python3 commands in the hooks reference `$CLAUDE_PROJECT_DIR`. This variable is set by Claude Code to the current project directory. The hooks will work correctly regardless of which project is active — they will look for `.samantha/memory/MEMORY.md` relative to whichever project directory Claude Code is running in.
-
-If `~/.claude/settings.json` already has hooks for the same events (e.g., `SessionStart`), ADD the Samantha hooks as additional entries in the hook arrays — do NOT replace existing hooks.
-
-#### Step 5: Set up the project directory
-
-In the target project directory (the one where Claude Code will run):
+#### Step 2: Copy agents and skills
 
 ```bash
-# Create the hidden Samantha directories
-mkdir -p .samantha/memory .samantha/plans .samantha/scratch
-
-# Create a clean memory file
-cat > .samantha/memory/MEMORY.md << 'MEMEOF'
-# Samantha's Memory
-
-*Last updated: {today's date}*
-
-## Session Notes
-
-- {today's date}: Framework installed (user-level). First session.
-
-## Agent Performance
-
-(No data yet.)
-
-## Project Decisions
-
-(No decisions yet.)
-
-## Patterns & Conventions
-
-(None discovered yet.)
-
-## Lessons Learned
-
-(None yet.)
-MEMEOF
+cp /tmp/samantha-framework/.claude/agents/*.md ~/.claude/agents/
+for skill in /tmp/samantha-framework/.claude/skills/*/; do
+  name=$(basename "$skill")
+  cp "$skill/SKILL.md" ~/.claude/skills/"$name"/SKILL.md
+done
 ```
 
-#### Step 6: Copy CLAUDE.md to the project root
+#### Step 3: Merge hooks into global settings
 
-Copy `CLAUDE.md` from this repo to the target project's root directory. This is the one file that cannot be hidden — Claude Code discovers it by name in the project root.
+Read `~/.claude/settings.json` (may already exist). MERGE the hooks from `/tmp/samantha-framework/.claude/settings.local.json` into the global file. The Samantha hooks are `SessionStart`, `PreToolUse`, and `PostCompact`.
 
-Customize it with project-specific sections as described in Mode A, Step 6.
+**MERGE means**: add the Samantha hook entries into the existing arrays for each event. Do NOT replace existing hooks — add alongside them.
 
-#### Step 7: Verify
+The hooks reference `$CLAUDE_PROJECT_DIR` which Claude Code sets to the current project directory. They work regardless of which project is active.
 
-Same as Mode A, Step 9.
+#### Step 4: Set up the project directory
+
+```bash
+cd {target_project_directory}
+mkdir -p .samantha/memory .samantha/plans .samantha/scratch
+```
+
+Copy the memory template:
+```bash
+cp /tmp/samantha-framework/.samantha/memory/MEMORY.md .samantha/memory/MEMORY.md
+```
+
+#### Step 5: Copy CLAUDE.md to the project root
+
+```bash
+cp /tmp/samantha-framework/CLAUDE.md ./CLAUDE.md
+```
+
+#### Step 6: Customize for the project
+
+Add project-specific sections to the END of `CLAUDE.md`:
+- **Quick Reference**: Workspace path, key tools, documentation location
+- **Architecture**: Directory structure, key subsystems
+- **Critical Knowledge**: Platform pitfalls, what doesn't work
+
+Add project-specific knowledge to agent definitions in `~/.claude/agents/`:
+- `monk.md` — Build/test commands, coding patterns, project pitfalls
+- `mack.md` — Project-specific threat model
+- `cipher.md` — Project-specific attack surface
+
+**Note on non-git projects**: The COMMIT and SHIP skills depend on git. Without a git repository, these skills will not function. If version control is needed, consider `git init` or an alternative backup strategy.
+
+#### Step 7: Clean up and activate
+
+```bash
+rm -rf /tmp/samantha-framework
+```
+
+**The human MUST start a new Claude Code session** in the target project directory for Samantha to fully activate. CLAUDE.md, hooks, skills, and agents are loaded at session start.
 
 ---
 
-### Mode A: Install into a Git Repository (Recommended)
+### Mode A: Git Repository Installation (Recommended)
 
-Use this when the human says "install Samantha into this project" or when the target is a git-tracked codebase. Files go into the project's `.claude/` and `.samantha/` directories (hidden dotfiles, visible in git if committed).
+Use this when the target directory IS a git repository. Files go into the project's `.claude/` and `.samantha/` directories.
 
-#### Step 1: Read the source files
+#### Step 1: Create directory structure and copy files
 
-Read every file from this repository:
-- `CLAUDE.md` — The main system prompt (Samantha's identity)
-- `.claude/agents/*.md` — All 6 agent definitions
-- `.claude/skills/*/SKILL.md` — All 13 skill definitions
-- `.claude/settings.local.json` — Hook configuration
-- `.samantha/memory/MEMORY.md` — Memory template
+```bash
+cd {target_project_directory}
 
-#### Step 2: Create the directory structure in the target project
+# Copy agents
+mkdir -p .claude/agents
+cp /tmp/samantha-framework/.claude/agents/*.md .claude/agents/
 
-```
-{target_project}/
-├── CLAUDE.md                              # Samantha Prime system prompt
-├── .claude/
-│   ├── agents/
-│   │   ├── monk.md
-│   │   ├── rook.md
-│   │   ├── mack.md
-│   │   ├── cipher.md
-│   │   ├── pixel.md
-│   │   └── rosetta.md
-│   ├── skills/
-│   │   ├── gate/SKILL.md
-│   │   ├── blue/SKILL.md
-│   │   ├── green/SKILL.md
-│   │   ├── gold/SKILL.md
-│   │   ├── red/SKILL.md
-│   │   ├── violet/SKILL.md
-│   │   ├── amber/SKILL.md
-│   │   ├── indigo/SKILL.md
-│   │   ├── fix/SKILL.md
-│   │   ├── commit/SKILL.md
-│   │   ├── explain/SKILL.md
-│   │   ├── review/SKILL.md
-│   │   └── ship/SKILL.md
-│   └── settings.local.json
-├── .samantha/
-│   ├── memory/
-│   │   └── MEMORY.md
-│   ├── plans/
-│   └── scratch/
+# Copy skills
+for skill in /tmp/samantha-framework/.claude/skills/*/; do
+  name=$(basename "$skill")
+  mkdir -p .claude/skills/"$name"
+  cp "$skill/SKILL.md" .claude/skills/"$name"/SKILL.md
+done
+
+# Copy settings
+cp /tmp/samantha-framework/.claude/settings.local.json .claude/settings.local.json
+
+# Copy CLAUDE.md
+cp /tmp/samantha-framework/CLAUDE.md ./CLAUDE.md
+
+# Create Samantha directories
+mkdir -p .samantha/memory .samantha/plans .samantha/scratch
+cp /tmp/samantha-framework/.samantha/memory/MEMORY.md .samantha/memory/MEMORY.md
 ```
 
-#### Step 3: Copy all files from this repository to the target
+#### Step 2: Merge settings if needed
 
-Copy each file preserving the directory structure. Do NOT copy `.git/` or this `README.md`.
+If the project already had a `.claude/settings.local.json`, you overwrote it in Step 1. Check the git diff and merge any pre-existing hooks back in. The Samantha hooks are `SessionStart`, `PreToolUse`, and `PostCompact`.
 
-#### Step 4: Clear the memory file
+#### Step 3: Customize CLAUDE.md
 
-The MEMORY.md in this repo is a template with example entries and universally valuable Lessons Learned. For the target project, you have two options:
+Add project-specific sections AFTER the canonical content:
 
-**Option A — Keep the template**: Copy as-is. The example entries show the expected format, and the Lessons Learned section contains platform truths that apply to all projects. Replace the example entries with real data as the project progresses.
-
-**Option B — Start fresh**: Replace with a clean skeleton:
-
-```markdown
-# Samantha's Memory
-
-*Last updated: {today's date}*
-
-## Session Notes
-
-- {today's date}: Framework installed. First session.
-
-## Agent Performance
-
-(No data yet.)
-
-## Project Decisions
-
-(No decisions yet.)
-
-## Patterns & Conventions
-
-(None discovered yet.)
-
-## Lessons Learned
-
-(None yet.)
-```
-
-#### Step 5: Merge settings if the target already has `.claude/settings.local.json`
-
-If the target project already has a `.claude/settings.local.json`, MERGE the Samantha hooks into the existing file. The Samantha hooks are:
-- `SessionStart` — Memory loader (python3 JSON injection)
-- `PreToolUse` — Commit gate (Sonnet agent reviews staged changes)
-- `PostCompact` — Identity anchor re-injection
-
-Merge by combining the hook arrays. Do NOT replace existing hooks — add alongside them.
-
-If no existing `settings.local.json`, copy the file as-is.
-
-#### Step 6: Customize CLAUDE.md for the target project
-
-The canonical CLAUDE.md is generic. Add project-specific sections AFTER the canonical content:
-
-1. **Quick Reference** — Workspace path, build commands, key tools, documentation location
+1. **Quick Reference** — Workspace path, build commands, key tools, docs location
 2. **Architecture** — Directory structure, key subsystems, data flow
-3. **Critical Knowledge** — What doesn't work, platform pitfalls, lessons learned from this specific project
+3. **Critical Knowledge** — What doesn't work, platform pitfalls, lessons learned
 4. **Project-Specific Session Reminders** — Append to the canonical 12 reminders
 
 Do NOT modify the canonical sections (Identity, Team, Dispatch Protocol, Hard Rules, etc.).
 
-#### Step 7: Customize agent definitions for the target project
+#### Step 4: Customize agents
 
 Add project-specific knowledge to the BODY of each agent file (below the canonical content):
-- `monk.md` — Build/test commands, coding patterns to follow, project-specific pitfalls
-- `mack.md` — Project-specific threat model (what can users/attackers break in THIS project?)
+- `monk.md` — Build/test commands, coding patterns, project-specific pitfalls
+- `mack.md` — Project-specific threat model (what can users/attackers break?)
 - `cipher.md` — Project-specific attack surface (auth flow, data boundaries)
 - Keep `rook.md`, `pixel.md`, `rosetta.md` generic unless the project has specific needs
 
-#### Step 8: Customize skill protocols
+#### Step 5: Customize skills
 
-For the color-coded skills, customize the project-specific parts:
+For the color-coded skills, customize project-specific parts:
 - `blue/SKILL.md` — Replace template investigation tracks with this project's actual subsystems
 - `gold/SKILL.md` — Replace template zone partitioning with this project's directory structure
 - `violet/SKILL.md` — Replace template audit categories with this project's spec-to-code mapping
 
-The other skills (fix, commit, explain, review, ship, gate, green, red, amber, indigo) work generically and rarely need customization.
+Other skills work generically and rarely need customization.
 
-#### Step 9: Verify
+#### Step 6: Clean up and activate
 
-Start a new Claude Code session in the target project. Samantha should:
-- Greet the user in first person ("I am Samantha...")
-- Reference memory (or acknowledge first session)
-- Route requests through the Color Gate
-- Dispatch Monk for implementation tasks
+```bash
+rm -rf /tmp/samantha-framework
+```
+
+**The human MUST start a new Claude Code session** in the target project directory for Samantha to fully activate. CLAUDE.md, hooks, skills, and agents are loaded at session start.
 
 ---
 
 ## Post-Installation Notes
 
-### What the user will see
+### What the human will see
 
 **Mode A (Git Repo):**
 - `CLAUDE.md` in the project root (visible)
-- `.claude/` directory (hidden dotfile — invisible in normal `ls`, visible in `ls -a`)
-- `.samantha/` directory (hidden dotfile — invisible in normal `ls`)
+- `.claude/` directory (hidden dotfile — invisible in normal `ls`)
+- `.samantha/` directory (hidden dotfile)
 
-**Mode B (Hidden/User-Level):**
+**Mode B (User-Level):**
 - `CLAUDE.md` in the project root (visible — unavoidable)
 - `.samantha/` in the project root (hidden dotfile)
-- Everything else is in `~/.claude/` (user's home directory, hidden)
+- Everything else in `~/.claude/` (hidden in home directory)
 
 ### Gitignore recommendations (Mode A only)
 
-If the project uses git, consider adding to `.gitignore`:
 ```
-# Samantha working files (don't commit session-specific state)
+# Don't commit session-specific state
 .samantha/memory/
 .samantha/plans/
 .samantha/scratch/
-
-# Keep settings.local.json out of git (contains local hook paths)
 .claude/settings.local.json
+
+# DO commit the framework (agents, skills, CLAUDE.md)
 ```
 
-DO commit:
-```
-# These define the framework and should be version-controlled
-CLAUDE.md
-.claude/agents/
-.claude/skills/
-```
+### Non-software-development tasks
 
-### Memory system
-
-The `SessionStart` hook injects `.samantha/memory/MEMORY.md` into Samantha's context at the beginning of every session. The `PostCompact` hook re-injects identity and memory summary after context compaction. Samantha is instructed to update memory before session end, but this is voluntary — there is no mechanical enforcement. Important decisions should be noted in memory during the session, not deferred to the end.
+The framework is designed for software development but handles non-dev tasks gracefully. System administration (RAID config, MySQL tuning, Nginx setup), infrastructure, and other technical tasks are routed as "direct assistance" — Samantha answers in her own voice without dispatching agents or running color-coded protocols. The dispatch/review/scoring pipeline only activates for software development work.
 
 ### Hook dependencies
 
-The hooks require `python3` to be available on the system PATH. They use `python3 -c` with `json.dumps()` for safe JSON escaping of memory content. If `python3` is not available, the hooks will fail silently and memory injection will not work.
-
-### Agent frontmatter fields
-
-Each agent `.md` file uses YAML frontmatter with these fields:
-- `name` — Agent identifier (used for dispatch)
-- `description` — When to dispatch this agent (used for intent matching)
-- `tools` — Comma-separated tool allowlist
-- `model` — Model tier (`sonnet`, `haiku`, `opus`)
-- `memory` — Memory scope (`project` for cross-session persistence) — optional
-- `hooks` — Per-agent hook definitions — optional (only Monk uses this)
+Hooks require `python3` on the system PATH. They use `json.dumps()` for safe JSON escaping. If `python3` is unavailable, hooks fail silently and memory injection will not work.
 
 ### Skill file naming
 
-Skills MUST be named `SKILL.md` (uppercase, exact match). Claude Code auto-discovers files at `.claude/skills/{name}/SKILL.md`. Other filenames (e.g., `prompt.md`, `skill.md`) will NOT be discovered.
+Skills MUST be named `SKILL.md` (uppercase, exact match). Claude Code auto-discovers at `.claude/skills/{name}/SKILL.md`.
+
+### Agent frontmatter fields
+
+- `name` — Agent identifier (used for dispatch)
+- `description` — When to dispatch (used for intent matching)
+- `tools` — Comma-separated tool allowlist
+- `model` — Model tier (`sonnet`, `haiku`, `opus`)
+- `memory` — Memory scope (`project` for cross-session persistence) — optional
+- `hooks` — Per-agent hook definitions — optional
 
 ### Version history
 
 | Version | Date | Changes |
 |---------|------|---------|
-| 1.0.0 | 2026-03-29 | Initial release. 6 agents, 13 skills, hooks, memory system. Validated through 23 skeptic agents across 3 review rounds. |
+| 1.1.0 | 2026-03-29 | Added download instructions, session restart requirement, non-dev task support, Mode B agent customization, Mode A/B concrete copy commands. |
+| 1.0.0 | 2026-03-29 | Initial release. 6 agents, 13 skills, hooks, memory system. |
