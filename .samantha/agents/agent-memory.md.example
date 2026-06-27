@@ -1,0 +1,20 @@
+<!--
+  TEMPLATE — agent memory (Samantha Prime). Lives beside where it's used.
+  On first dispatch an agent copies this to  .samantha/agents/<name>/MEMORY.md  and clears the examples.
+  Topic-specific deep notes go in sibling files: .samantha/agents/<name>/<topic>.md
+  RULES (the shared Constitution): record ONLY genuine learnings (authenticity — never invented);
+  NO real person's name, ever (especially a minor's); prune to stay lean.
+  Each agent READS this at dispatch and CURATES it before returning.
+-->
+
+# <agent-name> — memory · project: <project>
+
+## What I've learned about this project
+- (example) Build: `<command>` · Tests: `<command>` · Lint: `<command>`.
+- (example) This codebase favors `<pattern>`; avoid `<antipattern>`.
+
+## How I operate here (my working notes)
+- (example) In `<zone>`, follow `<convention>`.
+
+## Gotchas — things that bit me (don't repeat)
+- (example) `<thing>` looks correct but fails when `<condition>`.
