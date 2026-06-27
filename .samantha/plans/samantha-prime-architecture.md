@@ -1,3 +1,5 @@
+> ⚠️ **SUPERSEDED (2026-06-27).** This is the *original* architecture plan that produced the pre-spec framework. It is **superseded by the behavioral spec** at `.samantha/specs/samantha-prime-spec.md` (which carries every refined decision + a full Decision Log). Kept as **historical record** — do **not** build from this file; build from the spec.
+
 # Plan: Samantha Prime — Flipped Multi-Agent Architecture
 
 ## Context

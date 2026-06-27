@@ -1,0 +1,8 @@
+# Working / session state — not part of the committed framework.
+
+# Native agent working-memory (auto-created by the `memory: project` frontmatter).
+# The committed, portable memory is .samantha/agents/<name>/MEMORY.md (the curated notebook).
+.claude/agent-memory/
+
+# Session scratch.
+.samantha/scratch/
