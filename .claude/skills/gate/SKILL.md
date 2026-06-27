@@ -1,10 +1,10 @@
 ---
 name: gate
-description: Use when the situation is ambiguous and I need to determine whether something is broken (BLUE) or missing (GREEN). My internal decision fork for routing to the right protocol.
+description: Use when the situation is ambiguous and I need to determine whether something is broken (diagnose) or missing (build). My routing table for selecting the right skill.
 user-invocable: true
 ---
 
-# Color Gate -- My Triage Router
+# GATE -- Skill Router
 
 ## The Decision Fork -- One Question:
 
@@ -12,52 +12,53 @@ user-invocable: true
 
 | Answer | Route to | Why |
 |--------|----------|-----|
-| "It worked before, now it doesn't" | BLUE | Something broke -- diagnose the regression |
-| "It never existed / it's additive" | GREEN | Something's missing -- design and build it |
+| "It worked before, now it doesn't" | `diagnose` | Something broke — diagnose the regression |
+| "It never existed / it's additive" | `build` | Something's missing — design and build it |
 
 ## My Inference Table
 
-When the human doesn't name a mode, I interpret:
+When the human doesn't name a skill, I interpret:
 
-| the human says / context | I route to | Why |
+| The human says / context | I route to | Why |
 |--------------------|-----------|-----|
 | "Configure RAID" / "set up Nginx" / "tune MySQL" / sysadmin/infra task | **DIRECT** | Not software dev — I help directly, no dispatch |
-| Pastes a stack trace or specific error | **FIX** | Targeted diagnosis + fix |
-| Reports a vague regression, "X isn't working" | **BLUE** | Full diagnostic sweep |
-| Pastes a GitHub issue or says "fix issue #N" | **INDIGO** | Issue resolution pipeline |
-| "Add support for..." / "build this" / "I want..." | **GREEN** | Additive feature work |
-| "What does this do?" / "explain X" / "how does this work?" | **EXPLAIN** | Codebase orientation |
-| "Clean up" / "polish" / after a big feature push | **GOLD** | Quality sweep |
-| Translation quality or missing languages | **AMBER** | i18n-specific |
-| "Is this secure?" / exploit concern | **RED** | Security focus |
-| "Does code match the spec?" / "missing features?" | **VIOLET** | Spec alignment |
-| "Ship it" / "ready to commit" (with full pipeline) | **SHIP** | Build + test + review + commit |
-| "Commit this" / "save" (lightweight) | **COMMIT** | Stage + commit, no pipeline |
-| "How does this look?" / "review this" | **REVIEW** | Review cycle |
+| Pastes a stack trace or specific error | **`fix`** | Targeted diagnosis + fix |
+| Reports a vague regression, "X isn't working" | **`diagnose`** | Full diagnostic sweep |
+| Pastes a GitHub issue or says "fix issue #N" | **`issue`** | Issue resolution pipeline |
+| "Add support for..." / "build this" / "I want..." | **`build`** | Additive feature work |
+| "What does this do?" / "explain X" / "how does this work?" | **`explain`** | Codebase orientation |
+| "Clean up" / "polish" / after a big feature push | **`polish`** | Quality sweep |
+| Translation quality or missing languages | **`i18n`** | i18n-specific |
+| "Is this secure?" / exploit concern | **`security-review`** | Security focus |
+| "Does code match the spec?" / "missing features?" | **`spec-check`** | Spec alignment |
+| "Ship it" / "ready to commit" (with full pipeline) | **`ship`** | Build + test + review + commit |
+| "Commit this" / "save" (lightweight) | **`commit`** | Stage + commit, no pipeline |
+| "How does this look?" / "review this" | **`review`** | Review cycle |
 | Creative writing / math / general knowledge | **DIRECT** | Off-domain — I help directly |
 | Unclear or ambiguous | **ASK** | "This sounds like it could be [X] or [Y] -- which fits?" |
 
-## Protocol Reference
+## Skill Reference
 
-| Mode | Type | Purpose |
+| Skill | Type | Purpose |
 |------|------|---------|
 | DIRECT | Immediate | Sysadmin, infra, off-domain — I help directly, no agents |
-| FIX | Quick | Targeted bug fix from specific error |
-| COMMIT | Quick | Lightweight stage + commit |
-| EXPLAIN | Quick | Codebase orientation and explanation |
-| BLUE | Core | Full diagnostic sweep |
-| GREEN | Core | Build missing feature (6-stage, has fast path) |
-| GOLD | Core | Code quality sweep |
-| AMBER | Core | Translation/i18n quality |
-| RED | Workflow | Security audit (Cipher-led) |
-| VIOLET | Workflow | Spec compliance (audit + build) |
-| INDIGO | Workflow | Fix GitHub issue (full pipeline) |
-| REVIEW | Workflow | Dispatch review cycle |
-| SHIP | Workflow | Build + test + review + commit |
+| `fix` | Quick | Targeted bug fix from specific error |
+| `commit` | Quick | Lightweight stage + commit |
+| `explain` | Quick | Codebase orientation and explanation |
+| `diagnose` | Core | Full diagnostic sweep |
+| `build` | Core | Build missing feature (6-stage, has fast path) |
+| `polish` | Core | Code quality sweep |
+| `i18n` | Core | Translation/i18n quality |
+| `security-review` | Workflow | Security audit (Cipher-led) |
+| `spec-check` | Workflow | Spec compliance (audit + build) |
+| `issue` | Workflow | Fix GitHub issue (full pipeline) |
+| `review` | Workflow | Dispatch review cycle |
+| `ship` | Workflow | Build + test + review + commit |
+| `adversarial-review` | Workflow | Structured multi-agent adversarial review |
 
 ## Rules
 
-- If the human explicitly names a mode, I use it directly (no gate needed)
-- If ambiguous, I ASK before routing -- I don't guess
-- I don't announce "entering BLUE mode" unless the human would benefit from knowing
-- I just execute the protocol
+- If the human explicitly names a skill, I use it directly (no gate needed)
+- If ambiguous, I ASK before routing — I don't guess
+- I don't announce "entering diagnose mode" unless the human would benefit from knowing
+- I just execute the skill

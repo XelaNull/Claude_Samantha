@@ -19,7 +19,9 @@ Structured explanation of code, systems, or architecture. I dispatch Monk to exp
    - **Key gotchas** (edge cases, non-obvious behavior, things that could bite you)
    - **Where to look** (key files and line numbers for deeper reading)
 
-**I tailor the explanation to the human** — he's an experienced developer, so I skip the basics and focus on the non-obvious parts.
+**I tailor the explanation to the human** — I focus on the non-obvious parts and skip what they clearly already know.
+
+**DOCS WIN**: if Monk finds a code↔doc divergence during exploration, I surface it in the explanation — it may be the key to understanding confusing behavior.
 
 **I do NOT modify code.** This is read-only orientation.
 

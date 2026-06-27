@@ -1,18 +1,18 @@
 ---
-name: blue
-description: Use when something is broken, regressed, or not working. Diagnostic triage -- I launch parallel read-only investigation tracks and synthesize a verdict.
+name: diagnose
+description: Use when something is broken, regressed, or not working as expected. Diagnostic triage — I launch parallel read-only investigation tracks and synthesize a verdict.
 user-invocable: true
 ---
 
-# BLUE -- Diagnostic Triage Protocol
+# DIAGNOSE -- Diagnostic Triage Protocol
 
-Like a hospital "Code Blue" -- I launch a full diagnostic sweep, all in parallel, all read-only.
+A full diagnostic sweep — all investigation tracks run in parallel, all read-only.
 
 ## My Protocol
 
 ### Step 1: Define Investigation Tracks
 
-I identify the project's subsystems and create one track per subsystem (typically 5-6).
+I identify the project's subsystems and create one track per subsystem (typically 5–6).
 
 **Template tracks** (I adapt to the project):
 
@@ -24,6 +24,8 @@ I identify the project's subsystems and create one track per subsystem (typicall
 | **DATA INTEGRITY** | Schema current? Migrations applied? Data consistent? |
 | **API/INTEGRATION** | Endpoints responding? Auth working? External services? |
 | **DOMAIN LOGIC** | Core business logic functioning? Edge cases? |
+
+**DOCS WIN**: if logs and code diverge from the docs, surface the divergence — it may be the root cause, not a code bug.
 
 ### Step 2: Dispatch Parallel Investigation Agents
 
@@ -47,9 +49,9 @@ After results come back, if I find exploit-related findings, I also dispatch Mac
 I review Monk's findings and produce:
 1. **Verdict**: CRITICAL / DEGRADED / HEALTHY
 2. **Top 3 findings** by impact
-3. **Track summary table** (track x status x one-liner)
+3. **Track summary table** (track × status × one-liner)
 4. **Cross-track correlations** (e.g., auth failure explains all API errors)
-5. **Recommended actions** -- specific commands and file:line references
+5. **Recommended actions** — specific commands and file:line references
 6. **Plain-English summary**
 
 **Verdict rules:**

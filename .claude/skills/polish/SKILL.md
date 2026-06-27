@@ -1,10 +1,10 @@
 ---
-name: gold
+name: polish
 description: Use after major features or when code needs quality cleanup. Proactive sweep in zone-partitioned waves. I dispatch Monk for analyze/fix waves and specialists for their categories.
 user-invocable: true
 ---
 
-# GOLD -- Polish Protocol
+# POLISH -- Code Quality Sweep
 
 Proactive codebase quality sweep using Monk in orchestrated waves. Preventive, not reactive.
 
@@ -37,6 +37,8 @@ I dispatch Monk to scan against 8 categories:
 | 6 | CONSISTENCY | LOW | Naming drift, style inconsistency |
 | 7 | FRAGILE-LOGIC | HIGH | Assumptions, race conditions |
 | 8 | DOCUMENTATION-DRIFT | LOW | Code diverged from docs |
+
+**DOCS WIN**: for DOCUMENTATION-DRIFT findings, the default fix is updating the code to match the doc (canon is prescriptive). If the doc looks stale, log a DECISION — don't silently bend correct code to a stale doc, but don't silently accept drift either.
 
 For SECURITY-GAP findings, I dispatch Cipher for deeper analysis.
 For FRAGILE-LOGIC findings, I dispatch Mack for exploit assessment.

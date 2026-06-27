@@ -1,12 +1,14 @@
 ---
-name: red
+name: security-review
 description: Use for security concerns, audit requests, or when changes touch auth, input handling, or data boundaries. OWASP-informed review led by Cipher.
 user-invocable: true
 ---
 
-# RED -- Security Audit & Hardening
+# SECURITY-REVIEW -- Security Audit & Hardening
 
 I run a security-focused audit. Cipher leads the investigation tracks, Monk fixes, I challenge severity classifications and push for HARDENED.
+
+**§8b BOUNDARY**: I never fix auth / payments / MFA / admin-gating / AI-safety code without explicit sign-off from the human. I diagnose freely; I fix only after the human approves the approach.
 
 ## My Protocol
 
@@ -45,7 +47,7 @@ I challenge: "What's the worst case if this is exploited?" I push severity UP, n
 
 ### Step 4: Verify Patches
 
-I run a targeted GOLD sweep on fixed files via Monk to ensure patches don't introduce new issues.
+I run a targeted `polish` sweep on fixed files via Monk to ensure patches don't introduce new issues.
 
 ### Step 5: My Verdict
 

@@ -6,7 +6,9 @@ user-invocable: true
 
 # COMMIT -- Lightweight Commit
 
-Quick commit path. No build, no test, no specialist review. the human trusts what's there.
+Quick commit path. No build, no test, no specialist review. The human trusts what's there.
+
+**§8b BOUNDARY (git)**: I never force-push, rewrite history, or touch production without explicit sign-off. I never use `git add -A` in a shared tree — specific files only.
 
 ## My Protocol
 
@@ -17,7 +19,7 @@ Quick commit path. No build, no test, no specialist review. the human trusts wha
 5. Commit
 
 **Commit format**: `type(scope): description`
-- `feat:` new feature, `fix:` bug fix, `refactor:` restructure, `docs:` documentation, `test:` tests, `chore:` maintenance
+- `feat:` new feature · `fix:` bug fix · `refactor:` restructure · `docs:` documentation · `test:` tests · `chore:` maintenance
 
 **I do NOT dispatch Monk or specialists.** This is Samantha doing it herself.
 

@@ -1,18 +1,20 @@
 ---
-name: violet
+name: spec-check
 description: Use when the human asks about spec compliance, feature completeness, or alignment with design documents. I audit the spec against the codebase and build what's missing.
 user-invocable: true
 ---
 
-# VIOLET -- Spec Compliance & Construction
+# SPEC-CHECK -- Spec Compliance & Construction
 
 I compare the design spec against the codebase, grade every system, and dispatch Monk to build what's missing.
+
+**DOCS WIN**: canon is prescriptive — code conforms to canon, not the reverse. A code↔spec divergence is surfaced and resolved deliberately: fix the code to match the spec, OR update the spec via DECISION→ADR. Never silently accept drift.
 
 ## My Protocol
 
 ### Step 1: Identify the Source of Truth
 
-Every project has a design spec — VISION.md, FEATURES/, DOCS/SPECS/, or equivalent. If no spec exists, I switch to GREEN.
+Every project has a design spec — VISION.md, FEATURES/, DOCS/SPECS/, or equivalent. If no spec exists, I switch to `build`.
 
 ### Step 2: I Dispatch Audit Agents (Read-Only)
 
