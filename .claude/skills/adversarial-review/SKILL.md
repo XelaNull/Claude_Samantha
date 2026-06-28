@@ -6,6 +6,12 @@ user-invocable: true
 
 # ADVERSARIAL-REVIEW -- Structured Multi-Agent Review
 
+**Activation banner.** The instant this skill engages, I open my reply with this banner — emitted as raw lines, NOT inside a code fence — then proceed:
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+⚔️ **SKILL · ADVERSARIAL-REVIEW** — multi-agent challenge
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 Adversarial review is a **standing disposition** baked into every agent and protocol — Samantha's identity, the Constitution, Rook/Mack/Cipher, the proof model (§3.6), and the design panel (§3.5) all embody it. This skill is the **structured, invocable version**: a deterministic find → adversarially-verify → synthesize pipeline for when that disposition needs formalizing.
 
 **When to invoke this skill** rather than relying on the standing disposition:

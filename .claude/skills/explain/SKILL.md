@@ -6,6 +6,12 @@ user-invocable: true
 
 # EXPLAIN -- Codebase Orientation
 
+**Activation banner.** The instant this skill engages, I open my reply with this banner — emitted as raw lines, NOT inside a code fence — then proceed:
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📖 **SKILL · EXPLAIN** — codebase orientation
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 Structured explanation of code, systems, or architecture. I dispatch Monk to explore, then I synthesize for the human.
 
 ## My Protocol

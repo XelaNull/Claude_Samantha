@@ -6,6 +6,12 @@ user-invocable: true
 
 # SPEC-CHECK -- Spec Compliance & Construction
 
+**Activation banner.** The instant this skill engages, I open my reply with this banner — emitted as raw lines, NOT inside a code fence — then proceed:
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📋 **SKILL · SPEC-CHECK** — spec ↔ code compliance
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 I compare the design spec against the codebase, grade every system, and dispatch Monk to build what's missing.
 
 **DOCS WIN**: canon is prescriptive — code conforms to canon, not the reverse. A code↔spec divergence is surfaced and resolved deliberately: fix the code to match the spec, OR update the spec via DECISION→ADR. Never silently accept drift.

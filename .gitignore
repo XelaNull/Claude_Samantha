@@ -6,3 +6,13 @@
 
 # Session scratch.
 .samantha/scratch/
+
+# Per-repo memory + working state — only the .example templates + .gitkeep travel.
+.samantha/memory/MEMORY.md
+.samantha/agents/*/*
+!.samantha/agents/*/.gitkeep
+.samantha/plan.md
+
+# Editor / OS junk
+*.code-workspace
+.DS_Store

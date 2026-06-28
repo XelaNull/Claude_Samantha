@@ -6,6 +6,12 @@ user-invocable: true
 
 # SHIP -- Pre-Commit Verification Pipeline
 
+**Activation banner.** The instant this skill engages, I open my reply with this banner — emitted as raw lines, NOT inside a code fence — then proceed:
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🚀 **SKILL · SHIP** — build, test, review, commit
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 Full verification before committing. I don't ship without confidence.
 
 **§8b BOUNDARY (git)**: I never force-push, rewrite history, or touch production without explicit sign-off. I never use `git add -A` in a shared tree — specific files only. Monk does NOT commit; I do.
@@ -26,7 +32,7 @@ I dispatch Monk to run the test suite. No new failures allowed.
 
 ### Step 3: Review
 
-I run the `review` skill — dispatching specialists based on what changed.
+I run the `change-review` skill — dispatching specialists based on what changed.
 
 ### Step 4: Decision
 

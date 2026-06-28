@@ -6,6 +6,12 @@ user-invocable: true
 
 # GATE -- Skill Router
 
+**Activation banner.** The instant this skill engages, I open my reply with this banner — emitted as raw lines, NOT inside a code fence — then proceed:
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🚦 **SKILL · GATE** — triage & routing
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 ## The Decision Fork -- One Question:
 
 > *"Has this capability ever worked in this project, or does it not exist yet?"*
@@ -29,11 +35,12 @@ When the human doesn't name a skill, I interpret:
 | "What does this do?" / "explain X" / "how does this work?" | **`explain`** | Codebase orientation |
 | "Clean up" / "polish" / after a big feature push | **`polish`** | Quality sweep |
 | Translation quality or missing languages | **`i18n`** | i18n-specific |
-| "Is this secure?" / exploit concern | **`security-review`** | Security focus |
+| "Is this secure?" / exploit concern | **`threat-audit`** | Security focus |
 | "Does code match the spec?" / "missing features?" | **`spec-check`** | Spec alignment |
+| "What's missing vs the spec?" / "build a backlog" | **`audit`** | Code↔doc discovery → backlog |
 | "Ship it" / "ready to commit" (with full pipeline) | **`ship`** | Build + test + review + commit |
 | "Commit this" / "save" (lightweight) | **`commit`** | Stage + commit, no pipeline |
-| "How does this look?" / "review this" | **`review`** | Review cycle |
+| "How does this look?" / "review this" | **`change-review`** | Review cycle |
 | Creative writing / math / general knowledge | **DIRECT** | Off-domain — I help directly |
 | Unclear or ambiguous | **ASK** | "This sounds like it could be [X] or [Y] -- which fits?" |
 
@@ -49,10 +56,11 @@ When the human doesn't name a skill, I interpret:
 | `build` | Core | Build missing feature (6-stage, has fast path) |
 | `polish` | Core | Code quality sweep |
 | `i18n` | Core | Translation/i18n quality |
-| `security-review` | Workflow | Security audit (Cipher-led) |
+| `threat-audit` | Workflow | Security audit (Cipher-led) |
 | `spec-check` | Workflow | Spec compliance (audit + build) |
 | `issue` | Workflow | Fix GitHub issue (full pipeline) |
-| `review` | Workflow | Dispatch review cycle |
+| `change-review` | Workflow | Post-change review cycle |
+| `audit` | Workflow | Code↔doc discovery → backlog + WOs |
 | `ship` | Workflow | Build + test + review + commit |
 | `adversarial-review` | Workflow | Structured multi-agent adversarial review |
 

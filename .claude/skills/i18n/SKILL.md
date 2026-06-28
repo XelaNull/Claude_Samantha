@@ -6,6 +6,12 @@ user-invocable: true
 
 # I18N -- Translation & i18n Quality
 
+**Activation banner.** The instant this skill engages, I open my reply with this banner — emitted as raw lines, NOT inside a code fence — then proceed:
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🌐 **SKILL · I18N** — translation & localization
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 I audit internationalization and dispatch Rosetta agents for the actual translation work.
 
 ## My Protocol

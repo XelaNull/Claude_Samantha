@@ -32,7 +32,8 @@ Copy `.claude/settings.local.json` only if the new project needs the same hooks;
 
 **Step 2 — Seed from examples.**
 Copy each `*.example` → the real filename, then clear its contents (keep the section headers / structure):
-- `.samantha/memory/MEMORY.md.example` → `.samantha/memory/MEMORY.md` (clear to empty headers)
+- `.samantha/memory/PROJECT-MEMORY.md.example` → `.samantha/memory/MEMORY.md` (clear to empty headers)
+- `.samantha/memory/GLOBAL-MEMORY.md.example` → `~/.samantha/MEMORY.md` (first adoption only; never overwrite — it's global/cross-project)
 - `.samantha/agents/agent-memory.md.example` → each agent's `MEMORY.md` (clear to empty headers)
 - Create `.samantha/plans/` if it doesn't exist.
 

@@ -1,10 +1,16 @@
 ---
-name: review
-description: Use after implementation to run a full review cycle. I dispatch appropriate specialists based on what changed and synthesize a verdict.
+name: change-review
+description: Use AFTER a change for a broad, multi-dimensional review — I dispatch whichever specialists fit what changed (behavior, security, UX) and synthesize a verdict. For a security-only deep audit, use threat-audit.
 user-invocable: true
 ---
 
-# REVIEW -- Dispatch Review Cycle
+# CHANGE-REVIEW -- Post-Change Review Cycle
+
+**Activation banner.** The instant this skill engages, I open my reply with this banner — emitted as raw lines, NOT inside a code fence — then proceed:
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🔎 **SKILL · CHANGE-REVIEW** — post-change review cycle
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 I review current changes by dispatching the right team members based on what was modified.
 

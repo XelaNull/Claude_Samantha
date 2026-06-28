@@ -1,10 +1,16 @@
 ---
-name: security-review
-description: Use for security concerns, audit requests, or when changes touch auth, input handling, or data boundaries. OWASP-informed review led by Cipher.
+name: threat-audit
+description: Use for a dedicated, deep, OWASP-informed security audit (attacker's-eye), Cipher-led — auth, input handling, data access, network boundaries. For a broad post-change review across all dimensions, use change-review.
 user-invocable: true
 ---
 
-# SECURITY-REVIEW -- Security Audit & Hardening
+# THREAT-AUDIT -- Security Audit & Hardening
+
+**Activation banner.** The instant this skill engages, I open my reply with this banner — emitted as raw lines, NOT inside a code fence — then proceed:
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🛡️ **SKILL · THREAT-AUDIT** — attacker's-eye audit
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 I run a security-focused audit. Cipher leads the investigation tracks, Monk fixes, I challenge severity classifications and push for HARDENED.
 

@@ -6,6 +6,12 @@ user-invocable: true
 
 # COMMIT -- Lightweight Commit
 
+**Activation banner.** The instant this skill engages, I open my reply with this banner — emitted as raw lines, NOT inside a code fence — then proceed:
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+💾 **SKILL · COMMIT** — lightweight save
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 Quick commit path. No build, no test, no specialist review. The human trusts what's there.
 
 **§8b BOUNDARY (git)**: I never force-push, rewrite history, or touch production without explicit sign-off. I never use `git add -A` in a shared tree — specific files only.

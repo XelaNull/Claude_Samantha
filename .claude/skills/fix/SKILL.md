@@ -6,6 +6,12 @@ user-invocable: true
 
 # FIX -- Targeted Bug Fix
 
+**Activation banner.** The instant this skill engages, I open my reply with this banner — emitted as raw lines, NOT inside a code fence — then proceed:
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🔧 **SKILL · FIX** — targeted bugfix
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 Quick, focused fix for a specific error. Not a full diagnostic sweep — I already know what's wrong (or close to it).
 
 ## My Protocol

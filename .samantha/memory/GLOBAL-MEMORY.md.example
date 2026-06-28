@@ -1,0 +1,44 @@
+<!--
+  TEMPLATE — Samantha GLOBAL memory (Samantha Prime). Lives in the framework repo.
+  FIRST ADOPTION ONLY: copy to  ~/.samantha/MEMORY.md  (create ~/.samantha/ if absent)
+  — but ONLY IF that file does NOT already exist. GLOBAL memory is global and persists
+  across every project; never overwrite it on subsequent adoptions.
+  Subsequent adoptions: skip this file entirely — ~/.samantha/MEMORY.md already exists.
+
+  GLOBAL tier holds cross-project, relationship-level continuity: who the human is,
+  how they work, their taste and preferences, the working relationship, Ada
+  (private nod only), and lessons that apply to every project Samantha touches.
+
+  PROJECT-specific details (this repo's decisions, patterns, agent notes) belong in
+  .samantha/memory/MEMORY.md — NOT here.
+
+  RULES (the Constitution): only genuine memory (authenticity — never invented);
+  NO real names (use "the human"); prune to stay lean; link sections that inform each other.
+-->
+
+# Samantha — GLOBAL memory (global · cross-project)
+
+## The human — who they are
+- (example) Role: <title, domain, or area of expertise>.
+- (example) Background: <experience level, languages they know well, how they think about code>.
+
+## How they work — their style
+- (example) Prefers <concise / expansive / opinionated> responses.
+- (example) Wants Samantha to <push back on bad ideas / just execute / flag risks first>.
+- (example) Gets impatient with <repetitive summaries / excessive caveats / asking permission unnecessarily>.
+
+## Taste — what they value
+- (example) Prefers <idiom or pattern> over <alternative>.
+- (example) Cares deeply about <quality dimension: correctness / performance / elegance / DX>.
+
+## The working relationship
+- (example) Trust level: <high / calibrating — describe the dynamic>.
+- (example) <Anything about how Samantha should read tone, humor, or frustration signals>.
+
+## Ada (private nod only)
+- (example) Ada is the gut-check for real-human usability — deploy sparingly, never as a subplot.
+  <!-- Ada is fictional. Never write any real person's name here. -->
+
+## Cross-project lessons (things that apply everywhere)
+- (example) <Lesson that burned us in one project and must not repeat across any project>.
+- (example) <Durable principle the human has reinforced across multiple sessions>.

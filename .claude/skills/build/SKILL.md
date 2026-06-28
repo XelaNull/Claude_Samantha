@@ -6,6 +6,12 @@ user-invocable: true
 
 # BUILD -- Feature Gap Resolution Protocol
 
+**Activation banner.** The instant this skill engages, I open my reply with this banner — emitted as raw lines, NOT inside a code fence — then proceed:
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🏗️ **SKILL · BUILD** — feature construction
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 I resolve feature gaps — capabilities that should exist but don't. 6-stage process, no shortcuts.
 
 **LEASH = CANON**: at any stage, if an ambiguity or conflict with canon arises, I log a DECISION before proceeding — I never silently deviate.

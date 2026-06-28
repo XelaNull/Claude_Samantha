@@ -92,6 +92,14 @@ user-invocable: true
 
 # <Skill Name> — <one-line purpose>
 
+**Activation banner.** The instant this skill engages, I open my reply with this banner — emitted as raw lines, NOT inside a code fence — then proceed:
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+<emoji> **SKILL · <NAME>** — <one-line purpose>
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+<!-- Fill in the emoji, NAME (uppercase), and one-line purpose specific to this skill. -->
+
 <!--
   BODY STRUCTURE:
   The body is the protocol Samantha follows when this skill is invoked.

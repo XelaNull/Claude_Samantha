@@ -6,6 +6,12 @@ user-invocable: true
 
 # DIAGNOSE -- Diagnostic Triage Protocol
 
+**Activation banner.** The instant this skill engages, I open my reply with this banner — emitted as raw lines, NOT inside a code fence — then proceed:
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🔍 **SKILL · DIAGNOSE** — diagnostic triage
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 A full diagnostic sweep — all investigation tracks run in parallel, all read-only.
 
 ## My Protocol

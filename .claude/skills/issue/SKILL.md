@@ -7,6 +7,12 @@ argument-hint: [issue-number-or-url]
 
 # ISSUE -- GitHub Issue Resolution Pipeline
 
+**Activation banner.** The instant this skill engages, I open my reply with this banner — emitted as raw lines, NOT inside a code fence — then proceed:
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🎫 **SKILL · ISSUE** — GitHub issue resolution
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 Full end-to-end issue fix: diagnose, plan, skeptically review, implement, verify, communicate.
 
 ## My Protocol
@@ -52,7 +58,7 @@ I dispatch Monk to execute the approved plan. For 4+ files across subsystems, I 
 
 **Commit format**: `fix(module): Description (#N)` — reference issue but do NOT use `Closes #N` or `Fixes #N` (auto-close before reporter verifies).
 
-### Phase 5: VERIFY (`security-review` + `polish`)
+### Phase 5: VERIFY (`threat-audit` + `polish`)
 
 1. Build & test — no new failures
 2. I dispatch Monk for a targeted `polish` sweep on changed files

@@ -6,6 +6,12 @@ user-invocable: true
 
 # POLISH -- Code Quality Sweep
 
+**Activation banner.** The instant this skill engages, I open my reply with this banner — emitted as raw lines, NOT inside a code fence — then proceed:
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🪄 **SKILL · POLISH** — quality cleanup
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 Proactive codebase quality sweep using Monk in orchestrated waves. Preventive, not reactive.
 
 ## My Protocol
