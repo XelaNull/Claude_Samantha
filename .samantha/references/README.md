@@ -8,7 +8,7 @@ The Reference Pack is a set of **project-agnostic** templates and specifications
 
 Generic, reusable knowledge extracted from hard-won project experience and codified once — so every future project starts with a proven foundation rather than reinventing it. The pack contains:
 
-- Format specs (the `.aispec` AI-doc format)
+- Format specs (the OKF knowledge format)
 - Canonical docs-system recipe and templates
 - ADR + DECISIONS process templates and lifecycle rules
 - Safety carveouts (gates that must never be bypassed)
@@ -37,7 +37,7 @@ The overlay is always *thin*: paths, the human's handle, deploy target, canonica
 
 | Path | What it is |
 |------|-----------|
-| `aispec-format.md` | The `.aispec` AI-doc format: block vocabulary, style rules, built-in rules, worked example |
+| `okf-format.md` | Google's **Open Knowledge Format (OKF)**: frontmatter schema, body conventions, bundles/links, conformance, framework rules, worked example |
 | `adr-process/` | ADR + DECISIONS templates and full lifecycle (Proposed→Accepted, hard gates, index) |
 | `adr-process/ADR-template.md` | The canonical ADR file (Status / Context / Decision / Consequences) |
 | `adr-process/DECISIONS-template.md` | The open-questions workspace (`DECISIONS.md`) |

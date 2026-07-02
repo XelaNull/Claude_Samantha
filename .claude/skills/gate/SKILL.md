@@ -38,6 +38,7 @@ When the human doesn't name a skill, I interpret:
 | "Is this secure?" / exploit concern | **`threat-audit`** | Security focus |
 | "Does code match the spec?" / "missing features?" | **`spec-check`** | Spec alignment |
 | "What's missing vs the spec?" / "build a backlog" | **`audit`** | Code↔doc discovery → backlog |
+| "Write / validate a knowledge doc" / "migrate .aispec" | **`okf`** | Apply the OKF knowledge format |
 | "Ship it" / "ready to commit" (with full pipeline) | **`ship`** | Build + test + review + commit |
 | "Commit this" / "save" (lightweight) | **`commit`** | Stage + commit, no pipeline |
 | "How does this look?" / "review this" | **`change-review`** | Review cycle |
@@ -61,6 +62,7 @@ When the human doesn't name a skill, I interpret:
 | `issue` | Workflow | Fix GitHub issue (full pipeline) |
 | `change-review` | Workflow | Post-change review cycle |
 | `audit` | Workflow | Code↔doc discovery → backlog + WOs |
+| `okf` | Workflow | Author / validate / migrate OKF knowledge concepts |
 | `ship` | Workflow | Build + test + review + commit |
 | `adversarial-review` | Workflow | Structured multi-agent adversarial review |
 

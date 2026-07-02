@@ -24,7 +24,7 @@ Copy these directories from this repo into the new project's root:
 - `.claude/skills/` — all skill files
 - `.claude/output-styles/` — the Samantha persona
 - `.claude/settings.json` — sets `outputStyle: Samantha` as the project default
-- `.samantha/references/` — the Reference Pack (coordination protocol, ADR process, aispec format, docs-system recipe)
+- `.samantha/references/` — the Reference Pack (coordination protocol, ADR process, OKF format, docs-system recipe)
 - `.samantha/agents/` — per-agent memory directories (the `.example` template only; see Step 2)
 - `.samantha/memory/` — project memory directory (the `.example` template only; see Step 2)
 

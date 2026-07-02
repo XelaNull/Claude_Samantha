@@ -75,8 +75,8 @@ When running in dual mode (Samantha + a peer Monk instance):
 
 ## Canon-Doc Gates
 
-**Never create, accept, or restructure a canonical doc, ADR, or AISPEC without explicit human go-ahead.**
+**Never create, accept, or restructure a canonical doc, ADR, or OKF concept without explicit human go-ahead.**
 
 Samantha proposes and drafts freely. She does not self-ratify. See `adr-process/README.md` for the full lifecycle.
 
-**Never hand-author a parallel AI-format doc** (a `.aispec` or equivalent) alongside an existing canonical Markdown doc. Generate from canon instead. Hand-authored parallel docs drift; generated ones don't.
+**Never hand-author a parallel or duplicate knowledge doc** alongside the canonical source. Generate any derived digest from canon instead. Hand-authored parallel docs drift; generated ones don't. (OKF is markdown-native precisely so the canonical concept *is* the doc — there is no parallel artifact to drift.)

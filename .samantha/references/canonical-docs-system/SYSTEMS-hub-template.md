@@ -1,8 +1,11 @@
 ---
 # REQUIRED frontmatter — fill all fields before the generator will register this file.
 #
+# type:           OKF concept type (REQUIRED by OKF). For a hub doc this is `System`.
+#                 (Subsystem docs may use `System` too, with role: subsystem.)
+#
 # system:         The canonical name of the system this doc describes.
-#                 Used as the lookup key in INDEX.md. Keep it stable — renaming
+#                 Used as the lookup key in index.md. Keep it stable — renaming
 #                 requires an ADR (the name is part of the canonical address).
 #
 # role:           hub       → this is the authoritative entry-point for this system.
@@ -18,6 +21,7 @@
 #                 Leave blank and fill after first generation, or omit if this doc IS
 #                 the canonical source (not generated from another file).
 #
+type: System
 system: <system-name>
 role: hub
 status: Future
@@ -79,11 +83,12 @@ generated-from: ""
 
 ## Related
 
-<!-- Cross-links to subsystem docs, feature docs, ADRs, data models. All links repo-relative. -->
+<!-- Cross-links to subsystem docs, feature docs, ADRs, data models.
+     All links bundle-relative absolute (begin with / — OKF's stable form). -->
 
-- **Features:** [../FEATURES/](../FEATURES/) ← status of features in this system
-- **Data models:** [../DATA_MODELS/](../DATA_MODELS/) ← schemas
-- **ADRs:** [../ADR/](../ADR/) ← decisions that shaped this system
+- **Features:** [/FEATURES/](/FEATURES/) ← status of features in this system
+- **Data models:** [/DATA_MODELS/](/DATA_MODELS/) ← schemas
+- **ADRs:** [/ADR/](/ADR/) ← decisions that shaped this system
 
 ---
 

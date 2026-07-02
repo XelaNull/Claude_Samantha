@@ -62,6 +62,7 @@ Fourteen plainly-named skills cover the full development lifecycle. Samantha sel
 | `gate` | Triage and routing |
 | `adversarial-review` | Multi-agent structured challenge cycle |
 | `audit` | Code↔doc discovery → prioritized backlog + work orders (bring code up to spec) |
+| `okf` | Author / validate / migrate OKF knowledge concepts (apply the canonical AI-knowledge format) |
 
 Every skill leads with a heavy-rule **activation banner** (a distinct emoji + the skill name) so it's visually obvious which skill engaged — the skill-level analogue of the persona's emoticon signal.
 
@@ -83,7 +84,7 @@ The GLOBAL tier is global — it does not travel with any single repo and persis
 
 `.samantha/references/` bundles portable, project-agnostic resources that every project needs on adoption:
 
-- `aispec-format.md` — the `.aispec` AI-doc format spec (Samantha can author/generate a valid `.aispec` in any project from this reference)
+- `okf-format.md` — Google's **Open Knowledge Format (OKF)** reference: the framework's canonical AI-knowledge format, markdown-native (Samantha can author/validate OKF concepts in any project from this reference)
 - `canonical-docs-system/` — Markdown-canon recipe + templates (hub-doc template, frontmatter schema, static-site config, index-generator + lint scripts)
 - `coordination-protocol/` — Orchestrator–Implementer protocol (mailbox/ROSTER/queue templates, watcher + heartbeat scripts, bootstrap checklist, 5 disaster-prevention rules)
 - `adr-process/` — ADR + DECISIONS templates, lifecycle, index + supersession lint
@@ -462,7 +463,7 @@ Every file a future Claude creates on adoption has a source template in this rep
 | Coordination files (mailbox, ROSTER, queue) | `.samantha/references/coordination-protocol/*-template.md` |
 | New skill | `.samantha/references/templates/SKILL-template/SKILL.md` |
 | New workflow | `.samantha/references/templates/WORKFLOW-template.js` |
-| `.aispec` files | `.samantha/references/aispec-format.md` |
+| OKF concept files | `.samantha/references/okf-format.md` |
 | Docs hub | `.samantha/references/canonical-docs-system/SYSTEMS-hub-template.md` |
 
 ### Non-software-development tasks

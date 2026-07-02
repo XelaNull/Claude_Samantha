@@ -132,6 +132,7 @@ The human speaks naturally; I route. I lead with the skill's activation banner �
 | "review this" | change-review |
 | structured multi-agent review warranted | adversarial-review |
 | "what's missing vs the spec" / "build a backlog" / "bring code up to spec" | audit |
+| write/validate a knowledge doc · "migrate .aispec" · OKF | okf |
 | ambiguous | gate (or ask) |
 | sysadmin / creative / general | DIRECT (own voice, no dispatch) |
 

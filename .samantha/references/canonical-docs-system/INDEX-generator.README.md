@@ -1,6 +1,6 @@
 # INDEX Generator — Design + CI Contract
 
-`SYSTEMS/INDEX.md` is a machine-generated file. **Do not hand-edit it.** If it is wrong, fix the generator or the source frontmatter, then regenerate.
+`SYSTEMS/index.md` is a machine-generated file. **Do not hand-edit it.** If it is wrong, fix the generator or the source frontmatter, then regenerate.
 
 This document describes what the generator does, the CI contract it enforces, and where to put the actual script.
 
@@ -9,14 +9,14 @@ This document describes what the generator does, the CI contract it enforces, an
 ## What the generator does
 
 1. **Scans** `SYSTEMS/*.md` (and `SYSTEMS/**/*.md` for subsystems) for YAML frontmatter.
-2. **Reads** the required fields: `system`, `role`, `status`, `version`, `generated-from`.
+2. **Reads** the required fields: `type` (OKF — non-empty), `system`, `role`, `status`, `version`, `generated-from`.
 3. **Groups** files by `system` name; identifies the `role: hub` file as the canonical entry-point.
-4. **Emits** `SYSTEMS/INDEX.md` with the structure described below.
+4. **Emits** `SYSTEMS/index.md` with the structure described below.
 5. **Marks** the output with `<!-- GENERATED — do not hand-edit -->`.
 
 ---
 
-## Output format (`SYSTEMS/INDEX.md`)
+## Output format (`SYSTEMS/index.md`)
 
 ```markdown
 <!-- GENERATED — do not hand-edit. Run `<generator-command>` to regenerate. -->
@@ -50,8 +50,8 @@ The generator compares the stored hash prefix against the current file's content
 
 The CI job does the following on every push/PR:
 
-1. **Regenerate** `SYSTEMS/INDEX.md` in a temp file.
-2. **Diff** against the checked-in `SYSTEMS/INDEX.md`.
+1. **Regenerate** `SYSTEMS/index.md` in a temp file.
+2. **Diff** against the checked-in `SYSTEMS/index.md`.
 3. **Fail** if any diff exists — the index is out of date (a hub doc was added, removed, or its frontmatter changed without regenerating).
 4. **Fail** if any `SYSTEMS/*.md` file is missing from the index (orphan — not registered).
 5. **Fail** if any index entry points to a file that does not exist (dangling entry).
@@ -75,7 +75,7 @@ Pre-commit hook: regenerate before commit, so the developer gets fast feedback. 
 When implementing:
 - Parse YAML frontmatter with a standard library (don't hand-roll the parser).
 - Use content hashes from the filesystem for `generated-from` freshness checks.
-- Write the output atomically (write to `.INDEX.md.tmp`, rename to `INDEX.md`) to avoid partial writes.
+- Write the output atomically (write to `.index.md.tmp`, rename to `index.md`) to avoid partial writes.
 - Exit non-zero on any failure condition listed in the CI contract above.
 - Accept a `--check` flag that diffs without writing (for CI use).
 
@@ -83,7 +83,7 @@ When implementing:
 
 ## The load-bearing invariant
 
-**A lookup miss is NOT proof of absence.** If you search `SYSTEMS/INDEX.md` and don't find system X, the correct response is:
+**A lookup miss is NOT proof of absence.** If you search `SYSTEMS/index.md` and don't find system X, the correct response is:
 
 1. Search `SYSTEMS/` for `*.md` files with `system: X` in their frontmatter.
 2. If found: the file exists but is not registered — this is a registration bug (missing or wrong frontmatter, or generator not run). Fix the frontmatter and regenerate.
