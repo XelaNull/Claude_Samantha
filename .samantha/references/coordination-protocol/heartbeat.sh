@@ -7,7 +7,7 @@
 #
 # PURPOSE:
 #   Runs as a SEPARATE background process from watch-coordination.sh.
-#   Two duties:
+#   Three duties:
 #
 #   1. IDLE-POKE (all instances): if this instance's own file has not been modified
 #      for >= IDLE_THRESHOLD seconds, append a timestamped 💓 HEARTBEAT entry to it.
@@ -19,11 +19,54 @@
 #      This replaces the old cron job — discovery duty folds into the heartbeat wake.
 #      The agent sees the signal in the background output and runs the M5 6-lens pass.
 #
+#   3. WATCHER DEAD-MAN SWITCH (all instances): each cadence tick, verify the sibling
+#      watch-coordination.sh process is still alive. The heartbeat has no value if the
+#      watcher is dead — and a backgrounded process can only wake its agent session by
+#      terminating. (Human-directed 2026-07-04.)
+#
+#      WHY SUSTAINED, NOT SINGLE-TICK: our watchers are ECHO-AND-TERMINATE — on every
+#      detected delta the watcher prints and EXITS, and the agent session re-arms it
+#      only at the END of its wake-cycle, which can take several minutes. So "watcher.pid
+#      points at a dead process" is the NORMAL state during every active wake-cycle, not
+#      a signal of trouble. v2 tripped on a single failed tick (+20s debounce) and fired
+#      a false positive mid-wake-cycle (watcher down ~2.5 min, session fully alive and
+#      posting) — corrected 2026-07-04 (v2.1). Only SUSTAINED death — dead across
+#      WATCHER_DEAD_TICKS consecutive cadence ticks (~15 min at the default 300s cadence)
+#      — distinguishes a genuinely dormant/dead session from a normal in-progress
+#      wake-cycle. If the watcher is confirmed dead for that many consecutive ticks,
+#      the heartbeat:
+#        a. Appends an ADDRESSED "⚠️ WATCHER-DOWN" alert to its own file (addressee:
+#           ALL if this is the orchestrator, else "orchestrator") so the peer's watcher
+#           wakes on it — closing the "unaddressed 💓 absorbed silently" gap.
+#        b. Prints a loud stdout banner with both re-arm commands.
+#        c. exit 42 (dead-man exit — distinct from the normal cap-reached exit 0) —
+#           this is the ONLY way a backgrounded process can wake a dormant agent session.
+#      COUNTER: a per-loop consecutive-failure counter increments on each failed
+#      watcher_alive check and resets to 0 the instant a check succeeds — including a
+#      fresh re-arm mid-count, since the mtime-GRACE below makes watcher_alive report
+#      "alive" immediately once the new watcher.pid is written, with no extra code
+#      needed to detect the reset.
+#      GRACE: a watcher.pid younger than 60s is assumed to be mid-(re)arm and never
+#      trips the alarm on its own (this is a per-check test, independent of and always
+#      applied before the consecutive-tick counter above). The heartbeat NEVER
+#      auto-re-arms the watcher (P6) — it only screams; the agent session re-arms it.
+#
 # CONCRETE VALUES:
-#   --idle-threshold  default 1200s (20 min): own file idle >= this → heartbeat fires.
-#   --cadence         default 300s  (5 min):  check-interval between idle-status checks.
-#   CAP               21600s (~6h): self-cap; agent re-arms if longer operation needed.
-#   DEPTH_FLOOR       12: minimum READY WOs before discovery triggers.
+#   --idle-threshold    default 1200s (20 min): own file idle >= this → heartbeat fires.
+#   --cadence           default 300s  (5 min):  check-interval between idle-status checks.
+#   CAP                 21600s (~6h): self-cap; agent re-arms if longer operation needed.
+#   DEPTH_FLOOR         12: minimum READY WOs before discovery triggers.
+#   WATCHER_GRACE       60s: watcher.pid younger than this is never treated as dead
+#                       (a deliberate kill-and-re-arm cycle in progress).
+#   WATCHER_DEAD_TICKS  3: consecutive failed cadence ticks required to trip the alarm —
+#                       ~15 min of sustained death at the default 300s cadence. Chosen
+#                       because echo-and-terminate watchers are legitimately "dead"
+#                       (exited, not yet re-armed) throughout any active wake-cycle;
+#                       only death sustained across multiple ticks means the session
+#                       itself has gone dormant/dead, not merely mid-wake-cycle.
+#   EXIT 42             Dead-man exit code: watcher confirmed dead for WATCHER_DEAD_TICKS
+#                       consecutive ticks, alert posted, heartbeat self-terminated as
+#                       its session's only wake mechanism.
 #
 # REQUIRED ARGUMENTS:
 #   --identity <id>                 This instance's stable ID.
@@ -101,9 +144,16 @@ readonly DEPTH_FLOOR=12
 
 STATE_DIR="$COORD_DIR/.watch-state/$IDENTITY"
 HEARTBEAT_PID_FILE="$STATE_DIR/heartbeat.pid"
+WATCHER_PID_FILE="$STATE_DIR/watcher.pid"
+readonly WATCHER_GRACE=60        # watcher.pid younger than this → never treated as dead
+readonly WATCHER_DEAD_TICKS=3    # consecutive failed cadence ticks → trip the alarm (~15 min @ 300s)
 
 # Absolute path of this script — used in the re-arm command printed at the cap.
 SCRIPT_ABS="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/$(basename "$0")"
+
+# Absolute path of the sibling watch-coordination.sh — used in the WATCHER-DOWN
+# alert's re-arm instructions. Same directory as this script (both ship together).
+WATCH_SCRIPT_ABS="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/watch-coordination.sh"
 
 # ── directories ───────────────────────────────────────────────────────────────
 
@@ -143,6 +193,45 @@ file_mtime() {
 
 now_epoch() { date +%s; }
 
+# ── watcher dead-man helper ───────────────────────────────────────────────────
+
+watcher_alive() {
+  # Returns 0 (alive) or 1 (dead). Never exits on error — used in a boolean context.
+  #
+  # Checks, in order:
+  #   1. watcher.pid missing or empty → dead.
+  #   2. GRACE: watcher.pid mtime < WATCHER_GRACE seconds old → alive (assume a
+  #      deliberate kill-and-re-arm cycle is in progress; don't false-trip on the
+  #      brief window between the old watcher exiting and the new one re-arming).
+  #   3. `kill -0 "$pid"` fails (no such process) → dead.
+  #   4. PID-reuse guard: the OS may have recycled the PID for an unrelated process
+  #      since the watcher wrote it. Confirm the live process's command line still
+  #      contains "watch-coordination.sh" — else dead (a recycled PID must not fake
+  #      liveness).
+  local pid mt now age
+
+  [[ -s "$WATCHER_PID_FILE" ]] || return 1
+
+  mt=$(file_mtime "$WATCHER_PID_FILE")
+  now=$(now_epoch)
+  age=$((now - mt))
+  if [[ $age -lt $WATCHER_GRACE ]]; then
+    return 0   # GRACE: too soon to judge — assume a re-arm cycle in progress.
+  fi
+
+  pid=$(cat "$WATCHER_PID_FILE" 2>/dev/null)
+  [[ -n "$pid" ]] || return 1
+
+  kill -0 "$pid" 2>/dev/null || return 1
+
+  # PID-reuse guard.
+  local cmd
+  cmd=$(ps -p "$pid" -o command= 2>/dev/null)
+  [[ "$cmd" == *watch-coordination.sh* ]] || return 1
+
+  return 0
+}
+
 # ── self-registration: write heartbeat PID (M2, M4) ──────────────────────────
 # PID goes to a dedicated single-writer file — no race with watch-coordination.sh
 # (the watcher writes watcher.pid; we write heartbeat.pid; <id>.md is never rewritten).
@@ -175,7 +264,9 @@ count_ready_wos() {
   # Count READY (unclaimed, buildable) WOs in QUEUE.md.
   # Looks for "| READY |" in the queue table (QUEUE-template.md format).
   [[ -f "$QUEUE_FILE" ]] || { echo 0; return; }
-  grep -c "| READY |" "$QUEUE_FILE" 2>/dev/null || echo 0
+  local n
+  n=$(grep -c "| READY |" "$QUEUE_FILE" 2>/dev/null) || true
+  echo "${n:-0}"
 }
 
 seconds_since_own_file_modified() {
@@ -197,11 +288,17 @@ append_heartbeat() {
     return
   fi
 
+  # Watcher pid read at append time — enriches the body with liveness context.
+  # Never fails the append if unreadable; degrade to "UNKNOWN" instead.
+  local watcher_pid_str
+  watcher_pid_str=$(cat "$WATCHER_PID_FILE" 2>/dev/null)
+  [[ -n "$watcher_pid_str" ]] || watcher_pid_str="UNKNOWN"
+
   # Direct append — heartbeat is the SOLE appender of HEARTBEAT entries (no race).
   # <id>.md is append-only: watcher ensures-or-creates it; we only append here.
   # M1: every heartbeat has a unique UTC timestamp → always unique content → watcher wakes.
-  printf '\n### %s — %s — 💓 HEARTBEAT\n\nAlive. Own file idle for >= %ss.\n' \
-    "$ts" "$IDENTITY" "$IDLE_THRESHOLD" >> "$MY_FILE"
+  printf '\n### %s — %s — 💓 HEARTBEAT\n\nAlive. Watcher %s OK. Own file idle for >= %ss.\n' \
+    "$ts" "$IDENTITY" "$watcher_pid_str" "$IDLE_THRESHOLD" >> "$MY_FILE"
 
   # M4: confirm append persisted.
   if ! tail -5 "$MY_FILE" 2>/dev/null | grep -q "HEARTBEAT"; then
@@ -211,9 +308,65 @@ append_heartbeat() {
   fi
 }
 
+trip_watcher_down_alarm() {
+  # Called only after watcher_alive has failed WATCHER_DEAD_TICKS consecutive cadence
+  # ticks in a row (main loop's consecutive-failure counter).
+  # Posts an ADDRESSED alert (so the peer's watcher, which filters by addressee,
+  # actually wakes on it), prints a loud banner, and self-terminates with exit 42 —
+  # the ONLY way a backgrounded process can wake a dormant agent session (P6: the
+  # heartbeat NEVER auto-re-arms the watcher itself — it only screams).
+  local ts pid addressee
+  ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+  pid=$(cat "$WATCHER_PID_FILE" 2>/dev/null)
+  [[ -n "$pid" ]] || pid="UNKNOWN"
+
+  if [[ "$ROLE" == "orchestrator" ]]; then
+    addressee="ALL"
+  else
+    addressee="orchestrator"
+  fi
+
+  # Guard: skip the append if MY_FILE is missing, but still exit — the alarm's
+  # dead-man exit is unconditional; a missing presence file must not suppress it.
+  if [[ -f "$MY_FILE" ]]; then
+    printf '\n### %s — %s → %s — ⚠️ WATCHER-DOWN\n\nWatcher PID %s is dead; this lane'"'"'s inbox is DEAF until the watcher is re-armed. Heartbeat is self-terminating as a dead-man wake signal for its own session. Re-arm the watcher with:\n\n  %s --identity %s --role %s --dir %s\n' \
+      "$ts" "$IDENTITY" "$addressee" "$pid" "$WATCH_SCRIPT_ABS" "$IDENTITY" "$ROLE" "$COORD_DIR" >> "$MY_FILE"
+
+    # M4: read back (tail + grep WATCHER-DOWN) to confirm the append persisted.
+    if ! tail -10 "$MY_FILE" 2>/dev/null | grep -q "WATCHER-DOWN"; then
+      echo "WARN: WATCHER-DOWN alert append did not persist in $MY_FILE" >&2
+    fi
+  else
+    echo "WARN: $MY_FILE does not exist. Skipping WATCHER-DOWN append but still self-terminating." >&2
+  fi
+
+  echo ""
+  echo "=== WATCHER DOWN — HEARTBEAT SELF-TERMINATING (dead-man wake) ==="
+  echo "Dead watcher PID: $pid"
+  echo ""
+  echo "Reason chain:"
+  echo "  1. Watcher confirmed dead across ${WATCHER_DEAD_TICKS} consecutive cadence ticks (~15 min)."
+  echo "  2. Addressed ⚠️ WATCHER-DOWN alert posted to $MY_FILE (addressee: $addressee) →"
+  echo "     the peer's watcher wakes on it (STAR addressing filter)."
+  echo "  3. This heartbeat now self-exits (exit 42) — a backgrounded process's ONLY"
+  echo "     way to wake its own dormant agent session is by terminating (harness"
+  echo "     task-completion notification)."
+  echo ""
+  echo "Re-arm BOTH, in this order (P6: use the harness Bash tool with"
+  echo "run_in_background=true — NEVER shell '&'):"
+  echo ""
+  echo "  1. $WATCH_SCRIPT_ABS --identity $IDENTITY --role $ROLE --dir $COORD_DIR"
+  echo "  2. $SCRIPT_ABS --identity $IDENTITY --role $ROLE --dir $COORD_DIR"
+  echo ""
+  echo "=== end dead-man alert ==="
+
+  exit 42
+}
+
 # ── main loop ─────────────────────────────────────────────────────────────────
 
 started_at=$(now_epoch)
+watcher_dead_ticks=0   # consecutive failed watcher_alive checks; resets to 0 on any success
 
 while true; do
   sleep "$CADENCE"
@@ -227,6 +380,26 @@ while true; do
     echo ""
     echo "  $SCRIPT_ABS --identity $IDENTITY --role $ROLE --dir $COORD_DIR"
     exit 0
+  fi
+
+  # WATCHER DEAD-MAN SWITCH: check every tick, before the idle logic.
+  # SUSTAINED-DEATH counter — echo-and-terminate watchers are legitimately dead
+  # (exited, awaiting re-arm) throughout any active wake-cycle, so a single failed
+  # tick is NORMAL, not a signal. Only death sustained across WATCHER_DEAD_TICKS
+  # consecutive ticks (~15 min @ default cadence) means the session itself has gone
+  # dormant/dead. A success at any point — including a fresh re-arm mid-count, which
+  # watcher_alive's mtime-GRACE reports as "alive" immediately — resets the counter
+  # to 0 with no extra code needed.
+  if watcher_alive; then
+    watcher_dead_ticks=0
+  else
+    watcher_dead_ticks=$((watcher_dead_ticks + 1))
+    echo "[heartbeat] watcher check failed (${watcher_dead_ticks}/${WATCHER_DEAD_TICKS})."
+    if [[ $watcher_dead_ticks -ge $WATCHER_DEAD_TICKS ]]; then
+      trip_watcher_down_alarm
+      # trip_watcher_down_alarm always exits (42) — unreachable, but explicit for readers.
+      exit 42
+    fi
   fi
 
   idle=$(seconds_since_own_file_modified)

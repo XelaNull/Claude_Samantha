@@ -7,7 +7,10 @@
 # ARGUMENTS:
 #   --identity <id>   This instance's stable ID (e.g. "orchestrator", "impl-alpha").
 #                     The instance's presence file is <coord-dir>/<id>.md.
-#   --role <role>     orchestrator  → watches ALL .md files in <coord-dir> EXCEPT its own (hub).
+#   --role <role>     orchestrator  → watches ALL .md files in <coord-dir> EXCEPT its own AND
+#                     QUEUE.md (hub). QUEUE.md is orchestrator-owned (single-writer, M7) — every
+#                     change to it is a self-write; a shrinking self-write previously caused a
+#                     phantom rotation wake (P1, ratified 2026-07-03).
 #                     implementer   → watches ONLY orchestrator.md (spoke).
 #   --dir <coord-dir> Path to the shared coordination directory.
 #
@@ -264,8 +267,11 @@ fi
 build_watch_set() {
   # Prints one file path per line (sorted, LC_ALL=C for determinism).
   if [[ "$ROLE" == "orchestrator" ]]; then
-    # Hub: all .md files in coord-dir EXCEPT own.
-    find "$COORD_DIR" -maxdepth 1 -name "*.md" ! -name "$IDENTITY.md" -type f \
+    # Hub: all .md files in coord-dir EXCEPT own AND QUEUE.md.
+    # QUEUE.md is orchestrator-owned (single-writer, M7) — every change to it is
+    # a self-write. Watching it caused a phantom rotation wake on a shrinking
+    # self-write (P1, ratified 2026-07-03).
+    find "$COORD_DIR" -maxdepth 1 -name "*.md" ! -name "$IDENTITY.md" ! -name "QUEUE.md" -type f \
       | LC_ALL=C sort
   else
     # Spoke: ONLY the Orchestrator's file.
@@ -318,7 +324,7 @@ echo "[watch] Polling every ${POLL_INTERVAL}s. Cap: $MAX_POLL iterations (~6h)."
 if [[ "$ROLE" == "implementer" ]]; then
   echo "[watch] Watching: $ORCH_FILE"
 else
-  echo "[watch] Watching: all .md files in $COORD_DIR except $MY_FILE"
+  echo "[watch] Watching: all .md files in $COORD_DIR except $MY_FILE and QUEUE.md"
 fi
 
 # ── poll loop ─────────────────────────────────────────────────────────────────

@@ -36,9 +36,11 @@ Otherwise: **stay in solo mode** (background subagents via `run_in_background`).
 
 - **Each instance writes only its OWN file** (outbox named by identity).
 - **Orchestrator (hub)** watches ALL files in the coord-dir except its own — auto-discovers new implementers.
+- QUEUE.md is also excluded from the hub's watch-set: it's orchestrator-owned (single-writer, M7), so every change to it is a self-write — watching it caused a phantom rotation wake (ratified 2026-07-03).
 - **Each Implementer (spoke)** watches ONLY the Orchestrator's file (its inbox for orders and decisions).
 - No spoke-to-spoke watching. No self-watching. Self-filter is structural, not conditional.
 - The directory's live contents **are** the roster — dynamic, self-populating, no hand-maintained static list.
+- **Message-log entries:** append-only at true EOF via shell `>>` (or the write-temp-then-rename pattern in MAILBOX-template.md) — never anchor-based Edit. Structured header/roster fields (`watcher_pid`, `heartbeat_pid`, `state`, `last_active`, `queue_depth`) are the opposite: updated in place via Edit, never appended.
 
 ---
 
@@ -88,6 +90,13 @@ Run these steps in order when standing up a new dual session.
 [ ] 8. Read orchestrator.md in full: catch up on open WOs, decisions, and context.
 [ ] 9. Post ACK: "impl-<name> armed in. Zone: <cwd>. Watching <coord-dir>/orchestrator.md."
 ```
+
+### Re-arm Rules
+
+- **Full-read after a gap.** After any watcher re-arm that follows a dead window (session cycle, crash, cap-expiry with a gap), the instance MUST full-read every file in its watch-set before resuming normal operation — the re-armed watcher baselines at current EOF, so gap-window messages are otherwise silently swallowed. A tail-glance is insufficient (mid-file anomalies make the tail misleading).
+- **PID refresh on re-arm.** PID refresh is part of the re-arm: every watcher/heartbeat (re)arm updates the presence file's PID fields in the SAME wake-cycle. Stale PIDs make liveness undiagnosable.
+- **Watcher dead-man switch (heartbeat.sh v2.1).** Each cadence tick, the heartbeat verifies its sibling `watch-coordination.sh` process is still alive (60s arm-grace on a fresh `watcher.pid`, PID-reuse guard). Sustained death — `WATCHER_DEAD_TICKS`=3 consecutive failed ticks, ~15 min at the default 300s cadence — trips the alarm: it appends an addressed `⚠️ WATCHER-DOWN` alert to its own file (Orchestrator → ALL, Implementer → orchestrator) and self-terminates with `exit 42` — the only way a backgrounded process can wake a dormant agent session. It never auto-re-arms the watcher (P6). **On `exit 42`: re-arm the watcher FIRST, then the heartbeat** — the heartbeat's own alarm exists precisely because the watcher can't wake anyone by itself. Receiving `⚠️ WATCHER-DOWN` from a peer means that peer's lane inbox is deaf; escalate if it persists past one re-arm.
+  Rationale: sustained-death rather than a single-tick check, because our watchers are echo-and-terminate — `watcher.pid` legitimately points at a dead process throughout every active wake-cycle (re-armed only at the end of it), so a single failed check is not evidence of trouble. v2 tripped on one failed tick and false-positived mid-wake-cycle (watcher down ~2.5 min, session fully alive and posting) — corrected 2026-07-04 in v2.1. (Human-directed.)
 
 ### Tear-down
 
@@ -245,12 +254,23 @@ The Orchestrator is the **sole author and committer** of protocol documents. Imp
 
 ---
 
+## Proving Standard
+
+Build/test passing is necessary, not sufficient — it cannot see runtime behavior, migrations, or content fidelity. For **lossless/migration WOs**, traceability matrices are CLAIMS, not proof:
+- The Implementer's per-wave review must sample source-vs-target SUBSTANCE for "migrated" rows — not just structure, links, and builds.
+- The Orchestrator must run an independent adversarial source-vs-target audit before marking DONE.
+- Recurring loss shapes to hunt: enumerations "preserved by reference" into archive-bound files; deferral ping-pong between waves; parameter/prosody/choreography tables summarized into prose.
+
+Lossless-mandate WOs inherit this proving standard automatically (see WORK-ORDER-template.md).
+
+---
+
 ## Key Files
 
 | File | Purpose |
 |------|---------|
 | `watch-coordination.sh` | Directory-based, identity-aware, echo-and-terminate watcher (STAR topology); named args `--identity`/`--role`/`--dir`; delta = newly appended bytes |
-| `heartbeat.sh` | Idle-poke + Orchestrator discover-on-idle trigger; named args; 20min idle threshold, 300s cadence |
+| `heartbeat.sh` | Idle-poke + Orchestrator discover-on-idle trigger + watcher dead-man switch (v2.1: verifies watcher.pid liveness each cadence tick, 60s arm-grace, PID-reuse guard; on 3 consecutive dead ticks posts `⚠️ WATCHER-DOWN` and self-terminates `exit 42`, never auto-re-arms — see § Re-arm Rules); named args; 20min idle threshold, 300s cadence |
 | `6-lens-audit.md` | M5: 6-lens discovery methodology — when to run, all six lenses with what to look for, output format |
 | `MAILBOX-template.md` | Message grammar, tag types, atomic-write rules, archive hygiene |
 | `WORK-ORDER-template.md` | WO format (full + one-liner tiers) and STATUS reply |
