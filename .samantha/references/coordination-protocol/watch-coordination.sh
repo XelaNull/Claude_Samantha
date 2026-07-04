@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 # watch-coordination.sh — Directory-based, identity-aware, echo-and-terminate watcher.
 #
+# v2.2 — SINGLETON GUARD (incident: orphan accumulation, 2026-07-04, ~10 orphaned
+#   watchers observed live in one session). Root cause: self-registration wrote the
+#   PID file unconditionally with no live-predecessor check; the poll loop only exits
+#   on an addressed delta or the ~6h cap, so an idle-window re-arm never told the old
+#   process to stop — it kept polling, orphaned, still tailing the same files (dupe
+#   wakes + a race on the shared .size state). Re-arm is now IDEMPOTENT: at most one
+#   watcher process alive per identity at any time. See "SINGLETON GUARD" below.
+#
 # USAGE:
 #   ./watch-coordination.sh --identity <id> --role orchestrator|implementer --dir <coord-dir>
 #
@@ -22,7 +30,10 @@
 #   If that file does not exist when the Implementer starts, the watcher waits up to 5 min.
 #
 # HOW IT WORKS:
-#   1. Self-registers: writes PID to <coord-dir>/.watch-state/<id>/watcher.pid (sole
+#   1. Self-registers: SINGLETON GUARD (v2.2) first checks whether a live predecessor
+#      watcher for this SAME identity is already running and, if so, replaces it (kills
+#      it, waits for it to die) — re-arm is idempotent, never orphans the old process.
+#      Then writes PID to <coord-dir>/.watch-state/<id>/watcher.pid (sole
 #      writer — no race with heartbeat). Ensures <id>.md exists; NEVER rewrites it
 #      (<id>.md is append-only; heartbeat is the sole appender of HEARTBEAT markers).
 #   2. Builds the watch-set by role (STAR topology — structural self-filter; never self-trip).
@@ -59,6 +70,10 @@
 #          size catches content growth even when mtime is wrong.
 #   M4 — After writing the PID file, read it back to confirm it persisted.
 #   M1 — Re-arm request is self-varying: the delta content is always unique.
+#   M5 — (v2.2) Re-arm is idempotent: at most one live watcher per identity. The
+#          SINGLETON GUARD replaces a live predecessor for the SAME identity only —
+#          it is PID-reuse-safe (verifies the recorded PID's command line before
+#          acting) and identity-scoped (never touches a peer's watcher).
 #
 # TOOL BACKGROUND (required):
 #   Run via the Bash tool with run_in_background=true.
@@ -242,6 +257,57 @@ delta_addressed_to_me() {
 # PIDs live in sole-writer files under .watch-state/ — not in <id>.md.
 # This eliminates the write race between watcher and heartbeat (each instance
 # is the exclusive writer of its own PID file; <id>.md stays append-only).
+
+# ── SINGLETON GUARD (v2.2): re-arm REPLACES a live predecessor, never orphans it ──
+# Incident 2026-07-04: idle-window re-arms accumulated ~10 orphaned watchers for the
+# same identity in one session. Root cause — self-registration wrote WATCHER_PID_FILE
+# unconditionally with no live-predecessor check; the poll loop only exits on an
+# addressed delta or the ~6h cap, so an idle-window re-arm never signaled the
+# predecessor to stop. Orphans kept tailing the same files: duplicate wakes + a race
+# on the shared .size state (STATE_DIR).
+#
+# Safety properties (both required — never relax either):
+#   - PID-reuse-safe: before killing, confirm the recorded PID's live command line
+#     still names THIS script. A recycled PID now running an unrelated process is
+#     never touched.
+#   - Identity-scoped: also requires "--identity $IDENTITY" as a whole token (bounded
+#     by whitespace or end-of-string) in that command line — NOT a plain substring
+#     match, which would false-positive on a prefix identity (e.g. identity "impl-a"
+#     is a literal substring of a peer's "--identity impl-alpha"). A peer's watcher
+#     is never killed.
+#
+# Kill target: plain `kill $OLD_PID` (not a process-group kill). Verified empirically
+# via a scratchpad functional test against the Bash-tool background-wrapper shape:
+# $$ recorded here is the inner script's own bash PID; the outer wrapper is simply
+# waiting on that one child via an `&&`-style chain. Killing the inner PID makes the
+# wrapper's wait return non-zero, the chain short-circuits, and the wrapper exits on
+# its own — zero remnant processes observed. The process-group branch below is a
+# defensive fallback only (for a wrapper shape that behaves differently and leaves
+# the PID alive past the wait window) — guarded by confirming the recorded PID is its
+# own process-group leader first, so it can never reach outside this watcher's subtree.
+if [[ -f "$WATCHER_PID_FILE" ]]; then
+  OLD_PID="$(cat "$WATCHER_PID_FILE" 2>/dev/null || true)"
+  if [[ -n "$OLD_PID" && "$OLD_PID" != "$$" ]] && kill -0 "$OLD_PID" 2>/dev/null; then
+    OLD_CMD="$(ps -p "$OLD_PID" -o command= 2>/dev/null || true)"
+    if [[ "$OLD_CMD" == *"watch-coordination.sh"* ]] \
+       && printf '%s' "$OLD_CMD" | grep -qE -- "--identity[[:space:]]+${IDENTITY}([[:space:]]|\$)" 2>/dev/null; then
+      kill "$OLD_PID" 2>/dev/null || true
+      for _ in 1 2 3 4 5; do
+        kill -0 "$OLD_PID" 2>/dev/null || break
+        sleep 0.2
+      done
+      if kill -0 "$OLD_PID" 2>/dev/null; then
+        # Defensive fallback (see comment above) — only if it's confirmed to be its
+        # own process-group leader, so this can never reach outside its own subtree.
+        OLD_PGID="$(ps -p "$OLD_PID" -o pgid= 2>/dev/null | tr -d ' ')"
+        if [[ -n "$OLD_PGID" && "$OLD_PGID" == "$OLD_PID" ]]; then
+          kill -- "-$OLD_PGID" 2>/dev/null || true
+        fi
+      fi
+      echo "[watch] replaced live predecessor watcher PID $OLD_PID (singleton guard v2.2)"
+    fi
+  fi
+fi
 
 printf '%s\n' "$$" > "$WATCHER_PID_FILE"
 
