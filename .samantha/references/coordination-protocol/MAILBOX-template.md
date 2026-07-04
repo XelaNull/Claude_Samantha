@@ -53,6 +53,7 @@ Every message follows this format exactly:
   echo "$new_message" >> "$TMPFILE"
   mv "$TMPFILE" "$MAILBOX_FILE"
   ```
+- **Message-log entries: append-only at true EOF via shell `>>`** (or the write-temp-then-rename pattern above) — never anchor-based Edit. A concurrent heartbeat daemon may have appended past your anchor since your last read, and an anchor-based edit inserts mid-file, defeating tail-diff addressing. Structured header/roster fields (`watcher_pid`, `heartbeat_pid`, `state`, `last_active`, `queue_depth`) are the opposite: updated in place via Edit, never appended — see ROSTER-template.md.
 
 ---
 

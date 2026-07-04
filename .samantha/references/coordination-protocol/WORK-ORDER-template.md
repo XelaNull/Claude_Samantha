@@ -44,6 +44,7 @@ List disjoint sub-parts explicitly so the Implementer can identify parallel fan-
 <How to prove it works — the exact command(s) and expected output, or the observable before/after state.
 The Implementer runs this and quotes the output in the STATUS reply.>
 Example: `<command>` → expected output: `<expected>`
+Note: lossless/migration WOs inherit the Proving Standard automatically (README.md) — traceability matrices are claims, not proof; require independent source-vs-target substance sampling plus an Orchestrator adversarial audit before DONE.
 
 **Refs:**
 <Canonical docs, ADRs, hub docs, related WOs. Repo-relative links.>

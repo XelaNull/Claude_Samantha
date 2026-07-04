@@ -45,6 +45,8 @@ watcher_pid:   <pid>                   # PID of watcher.sh background process; u
 heartbeat_pid: <pid>                   # PID of heartbeat.sh background process
 ```
 
+PID refresh is part of the re-arm: every watcher/heartbeat (re)arm updates these fields in the SAME wake-cycle. Stale PIDs make liveness undiagnosable.
+
 ## Session Timestamps
 
 ```
@@ -105,6 +107,8 @@ Readers must tolerate missing optional fields by using the default. Never break 
 | Version | Change | Date |
 |---------|--------|------|
 | 1 | Initial schema | (authoring date) |
+
+Note: 2026-07-03: P1–P5 ratified (unanimous) — see orchestrator.md log. (Process rules only; no schema field changes — schema_version remains 1.)
 
 ---
 
