@@ -238,7 +238,8 @@ if [[ -n "$COORD_DIR" && -n "$MY_ID" ]]; then
         # Matches "→ ALL" broadcasts — a missed DEPLOY-WINDOW OPEN should block commit.
         _addr_pattern="(→|->)[[:space:]]*(${MY_ID}|ALL)[[:space:]]*(—|--)"
         unread=$(tail -c +"$((receipt_sz + 1))" "$ORCH_FILE" 2>/dev/null | \
-          grep -cE "$_addr_pattern" 2>/dev/null || echo 0)
+          grep -cE "$_addr_pattern" 2>/dev/null) || true
+        unread="${unread:-0}"
         if [[ "$unread" -gt 0 ]]; then
           echo ""
           echo "FAIL [mailbox-read gate]: $unread unread message header(s) addressed to '$MY_ID' or 'ALL' in $ORCH_FILE"
