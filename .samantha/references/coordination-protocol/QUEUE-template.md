@@ -110,3 +110,36 @@ The **BACKLOG** (`.samantha/backlog/BACKLOG.md` or equivalent) is the deeper res
 - Keep the queue lean (focused on buildable work); keep the backlog deep (all known work).
 
 Flow: `BACKLOG → QUEUE (READY) → CLAIMED → DONE`
+
+---
+
+## Parallel-Safety: Lane Roster + Wave Plan
+
+The Orchestrator schedules on **Cells, not lanes** — a lane splits into collision-independent Cells that run at once. Full method: `PARALLEL-SAFETY.md`. Two additions to the queue:
+
+### PAR tag (additive column — M8-safe)
+Annotate each WO with its parallel-safety tag so the Implementer composes maximal safe build-waves:
+
+```
+[ <LANE>:<CELL> · <FREE|LANE|ORDERED|SERIAL> · blast:<🟩/🟨/🟥> · after: · conflicts: · deploy: · gate: ]
+```
+
+Add it as a `PAR` column on the Queue Table (append-only; never redefine an existing column).
+
+### Lane roster (broadcast alongside the three-bucket status)
+Enumerate the project's **full lane universe** — every repo + sub-lane — and per lane mark its status. This is the "how many tracks are running" dashboard.
+
+```
+### <UTC ISO 8601> — orchestrator → ALL — 🛰️ HEADS-UP
+
+**Lane Roster**  (K lanes: F fed · S starving · E empty · G gated)
+- <L1 name> · lane:<…> · Cells:[…] · status:FED       (worker: WO-<N>)
+- <L2 name> · lane:<…> · Cells:[…] · status:STARVING   (WO-<M> ready, no worker — fill now)
+- <L3 name> · lane:<…> ·           · status:EMPTY      (no WOs — Orchestrator to author)
+- <L4 name> · lane:<…> ·           · status:GATED      (needs human: <what>)
+```
+
+**Roster rules:** staff STARVING lanes before deepening a FED one; an EMPTY lane is the Orchestrator's gap to author work for; a GATED lane is surfaced to the human, never silently idle.
+
+### Wave plan
+The **wave** = the maximal set of READY WOs whose `Depends-on` are DONE and whose Cells are pairwise disjoint. That is what the Implementer fires now (one worker per WO). Recompute when a WO commits — its dependents may unblock.

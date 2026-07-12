@@ -16,16 +16,19 @@ A full WO explicitly names disjoint sub-parts so the Implementer can fan them to
 
 **WO-<N>: <short title — imperative, outcome-focused>**
 
+**PAR:** `[ <LANE>:<CELL> · <FREE|LANE|ORDERED|SERIAL> · blast:<🟩/🟨/🟥> · after:<WO…> · conflicts:<WO…> · deploy:<free|window|deploy-with|gated> · gate:<reviewers> ]`
+<Parallel-safety tag — see PARALLEL-SAFETY.md. Decompose the WO to Cells; the Scope sub-parts below are one-per-Cell so workers fan out on disjoint write-sets by construction. Carve any spine write into its own 🟥 sub-WO that commits first-and-solo.>
+
 **Goal:**
 <What must be true when this WO is complete. Observable, testable. NOT a list of steps — a statement
 of the finished state. The Implementer owns HOW; this is the WHAT.>
 
 **Scope:**
 <Exact files, zones, or subsystems this WO covers. Be precise — scope defines the lane.
-List disjoint sub-parts explicitly so the Implementer can identify parallel fan-out opportunities:>
-- Sub-part A: <files/zone> — <what changes here>
-- Sub-part B: <files/zone> — <what changes here>
-(Sub-parts A and B may be parallelized. Sub-part C depends on A.)
+List disjoint sub-parts explicitly — ONE PER CELL (see PARALLEL-SAFETY.md) — so the Implementer fans them to parallel workers on disjoint write-sets by construction:>
+- Sub-part A: <Cell / files (source ∪ tests)> — <what changes here>   [blast:🟩]
+- Sub-part B: <Cell / files> — <what changes here>   [blast:🟩]
+(Sub-parts A and B occupy different Cells → parallelize. Sub-part C is the stitch that wires them into <mount-point> → serial, after A+B. A spine write → its own 🟥 sub-part, first-and-solo.)
 
 **Constraints:**
 <What must NOT change. Patterns to follow. Antipatterns to avoid. Any known landmines.>
@@ -135,3 +138,5 @@ A full WO's **Scope** section lists disjoint sub-parts. The Implementer reads th
 4. Replies to the Orchestrator with a single STATUS covering the full WO.
 
 The Orchestrator does not need visibility into the sub-part fan-out — only the final STATUS and the proof output.
+
+**Parallel-safety:** the sub-parts a full WO lists are its Cells (see Scope). The Implementer composes a build-wave from **pairwise Cell-disjoint** sub-parts (up to the agent cap), runs any 🟥 spine sub-part **first-and-solo**, and schedules the **stitch** sub-part serial *after* the leaf wave. Full method: `PARALLEL-SAFETY.md`.
