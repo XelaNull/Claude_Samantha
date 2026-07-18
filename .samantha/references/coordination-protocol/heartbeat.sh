@@ -224,10 +224,13 @@ watcher_alive() {
 
   kill -0 "$pid" 2>/dev/null || return 1
 
-  # PID-reuse guard.
+  # PID-reuse guard. Accept EITHER the legacy one-shot watcher (watch-coordination.sh)
+  # OR the persistent coord-monitor.sh — both legitimately claim watcher.pid. Without
+  # coord-monitor.sh here, a live persistent monitor is misread as a dead watcher and
+  # the heartbeat false-fires exit-42 every WATCHER_DEAD_TICKS (~15 min). Cutover fix.
   local cmd
   cmd=$(ps -p "$pid" -o command= 2>/dev/null)
-  [[ "$cmd" == *watch-coordination.sh* ]] || return 1
+  [[ "$cmd" == *watch-coordination.sh* || "$cmd" == *coord-monitor.sh* ]] || return 1
 
   return 0
 }

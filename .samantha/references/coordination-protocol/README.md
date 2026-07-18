@@ -55,8 +55,9 @@ Run these steps in order when standing up a new dual session.
 [ ] 2. Create <coord-dir>/ if absent.
 [ ] 3. Write orchestrator.md from ROSTER-template (role=Orchestrator, state=Active).
 [ ] 4. M4: read it back — confirm it landed (sandbox filesystem can silently swallow writes).
-[ ] 5. Start watch-coordination.sh in background (Bash tool run_in_background):
-         ./watch-coordination.sh --identity orchestrator --role orchestrator --dir <coord-dir>
+[ ] 5. Arm coord-monitor.sh via your harness's output→chat bridge (Claude Code: Monitor tool
+         persistent:true · Cursor: Shell + notify_on_output — see workspace CLAUDE.md "Arming the inbox"):
+         ./coord-monitor.sh --identity orchestrator --dir <coord-dir>
 [ ] 6. Start heartbeat.sh in background:
          ./heartbeat.sh --identity orchestrator --role orchestrator --dir <coord-dir>
 [ ] 7. PID files are written automatically by the scripts.
@@ -79,8 +80,9 @@ Run these steps in order when standing up a new dual session.
          (If no identity pre-known, the Identity Bootstrap section provides the naming handshake.)
 [ ] 3. Write <coord-dir>/impl-<name>.md from ROSTER-template (role=Implementer, zone=<cwd>, state=Active).
 [ ] 4. M4: read it back — confirm it landed.
-[ ] 5. Start watch-coordination.sh in background (Bash tool run_in_background):
-         ./watch-coordination.sh --identity impl-<name> --role implementer --dir <coord-dir>
+[ ] 5. Arm coord-monitor.sh via your harness's output→chat bridge (Claude Code: Monitor tool
+         persistent:true · Cursor: Shell + notify_on_output — see workspace CLAUDE.md "Arming the inbox"):
+         ./coord-monitor.sh --identity impl-<name> --dir <coord-dir>
 [ ] 6. Start heartbeat.sh in background:
          ./heartbeat.sh --identity impl-<name> --role implementer --dir <coord-dir>
 [ ] 7. PID files are written automatically by the scripts.
@@ -93,11 +95,40 @@ Run these steps in order when standing up a new dual session.
 
 ### Re-arm Rules
 
+**PID-ALIVE ≠ agent-alerted (2026-07-17, Implementer #2 deaf-gap incident).** The monitor process consuming messages proves nothing about the AGENT seeing them — each harness needs an output→chat bridge (Claude Code: the `Monitor` tool; Cursor Agent: Shell `notify_on_output` — copy-paste patterns in the workspace CLAUDE.md). Two corollaries: (1) after ANY monitor re-arm, tail-read the peer file across the gap — a fresh baseline never replays what the dead ear missed; (2) the hub verifies a NEW seat's wake path with a live wake-test message before trusting event-driven handoffs to it.
+
+
 - **Full-read after a gap.** After any watcher re-arm that follows a dead window (session cycle, crash, cap-expiry with a gap), the instance MUST full-read every file in its watch-set before resuming normal operation — the re-armed watcher baselines at current EOF, so gap-window messages are otherwise silently swallowed. A tail-glance is insufficient (mid-file anomalies make the tail misleading).
 - **PID refresh on re-arm.** PID refresh is part of the re-arm: every watcher/heartbeat (re)arm updates the presence file's PID fields in the SAME wake-cycle. Stale PIDs make liveness undiagnosable.
-- **Watcher dead-man switch (heartbeat.sh v2.1).** Each cadence tick, the heartbeat verifies its sibling `watch-coordination.sh` process is still alive (60s arm-grace on a fresh `watcher.pid`, PID-reuse guard). Sustained death — `WATCHER_DEAD_TICKS`=3 consecutive failed ticks, ~15 min at the default 300s cadence — trips the alarm: it appends an addressed `⚠️ WATCHER-DOWN` alert to its own file (Orchestrator → ALL, Implementer → orchestrator) and self-terminates with `exit 42` — the only way a backgrounded process can wake a dormant agent session. It never auto-re-arms the watcher (P6). **On `exit 42`: re-arm the watcher FIRST, then the heartbeat** — the heartbeat's own alarm exists precisely because the watcher can't wake anyone by itself. Receiving `⚠️ WATCHER-DOWN` from a peer means that peer's lane inbox is deaf; escalate if it persists past one re-arm.
-  Rationale: sustained-death rather than a single-tick check, because our watchers are echo-and-terminate — `watcher.pid` legitimately points at a dead process throughout every active wake-cycle (re-armed only at the end of it), so a single failed check is not evidence of trouble. v2 tripped on one failed tick and false-positived mid-wake-cycle (watcher down ~2.5 min, session fully alive and posting) — corrected 2026-07-04 in v2.1. (Human-directed.)
-- **Early-arm for long wake-cycles (ratified 2026-07-04, unanimous).** With watch-coordination v2.2's singleton guard, arming is idempotent — a re-arm REPLACES a live same-identity predecessor instead of orphaning it. Therefore: for any wake-cycle expected to exceed ~10 minutes (builds, deploys, audits, long reads), ALSO arm the watcher at the START of the cycle. The watcher then stays alive through the cycle, so heartbeat v2.1's sustained-death check cannot trip on a legitimately-busy session (incident: 2026-07-04 16:30Z — a build+deploy cycle exceeded the ~15-min window and correctly-but-unnecessarily fired WATCHER-DOWN). "Re-arm as your LAST action" remains the floor; early-arm is the long-cycle option. Requires v2.2+ (md5 0a1ed3b184eb21af78e65f93f4aa82bb) — NEVER early-arm on pre-v2.2 scripts (it orphans).
+- **Watcher dead-man switch (heartbeat.sh v2.1+).** Each cadence tick, the heartbeat verifies its sibling `coord-monitor.sh` process is still alive (60s arm-grace on a fresh `watcher.pid`, PID-reuse guard — the guard also accepts the retired `watch-coordination.sh` for backward compatibility, see `retired/README.md`). Sustained death — `WATCHER_DEAD_TICKS`=3 consecutive failed ticks, ~15 min at the default 300s cadence — trips the alarm: it appends an addressed `⚠️ WATCHER-DOWN` alert to its own file (Orchestrator → ALL, Implementer → orchestrator) and self-terminates with `exit 42` — the only way a backgrounded process can wake a dormant agent session. It never auto-re-arms the watcher (P6). **On `exit 42`: re-arm the watcher FIRST, then the heartbeat** — the heartbeat's own alarm exists precisely because the watcher can't wake anyone by itself. Receiving `⚠️ WATCHER-DOWN` from a peer means that peer's lane inbox is deaf; escalate if it persists past one re-arm.
+  Rationale: sustained-death rather than a single-tick check, guarding against a transient `ps` race or momentary scheduler hiccup rather than genuine death — a single failed check should never be treated as proof of trouble. (This design point predates the persistent monitor: it was originally load-bearing for the retired echo-and-terminate watcher, whose `watcher.pid` legitimately pointed at a dead process for most of every wake-cycle. `coord-monitor.sh` is persistent — armed once per session, not re-armed per wake-cycle — so the tolerance now mostly guards against false alarms rather than a structurally-expected dead PID.)
+- **Arm once per session, not per wake-cycle.** `coord-monitor.sh` is a persistent, forever-running process armed under the harness's output→chat bridge (Claude Code: `Monitor` tool `persistent:true`; Cursor: Shell + `notify_on_output`) — it is NOT re-armed after each message the way the retired one-shot watcher was. There is no "early-arm for a long wake-cycle" concern under this model: the monitor stays alive continuously through builds, deploys, audits, and long reads with no re-arm timing to manage. Re-arm ONLY when `coord-status.sh` reports the watcher DEAD.
+
+### Network Filesystems / Cross-Machine Seats
+
+`fswatch` (`coord-monitor.sh`'s event-driven receive path) is built on OS-level
+filesystem-change notifications — FSEvents on macOS, inotify on Linux. Those
+notifications are **local-only**: a peer process running on a *different
+machine*, writing onto a coord-dir reached over a network mount (SMB, SSHFS,
+NFS), does not generate a local fs-event on your side. `fswatch_loop` will
+silently go deaf while still reporting itself armed.
+
+Use `--force-poll` on any seat whose coord-dir is a network mount:
+
+```bash
+./coord-monitor.sh --identity impl-alpha --dir <coord-dir> --force-poll --poll 2
+```
+
+This skips fswatch entirely (even if it happens to be on `PATH`) and runs the
+fixed-interval poll loop from the start. Polling is safe here because delta
+detection is size-based (`emit_new` stats and reads the file directly), not
+event-based — a plain stat/read sweep behaves identically over a network mount.
+
+Keep `--poll` at 2 seconds or higher on network mounts: SMB/NFS client-side
+attribute caching can delay a remote writer's size change from becoming
+visible for a few seconds. Treat the effective delivery latency as **low
+seconds, not milliseconds**, and don't tighten the poll interval expecting
+event-loop-like responsiveness — it won't get faster than the cache TTL allows.
 
 ### Tear-down
 
@@ -132,15 +163,17 @@ collision-free by construction.
    Creates `<coord-dir>/pending-<uuid>.md` with a `🛰️ HEADS-UP → orchestrator`
    requesting name assignment. The new file trips the Orchestrator's watcher.
 
-2. **Arm** the watcher under the provisional identity:
+2. **Arm** the monitor under the provisional identity, via your harness's output→chat
+   bridge (Claude Code: `Monitor` tool `persistent:true`; Cursor: Shell + `notify_on_output`
+   — see workspace CLAUDE.md "Arming the inbox"):
    ```bash
-   # Bash tool — run_in_background=true
-   ./watch-coordination.sh --identity "$PROV_ID" --role implementer --dir <coord-dir>
+   ./coord-monitor.sh --identity "$PROV_ID" --dir <coord-dir>
    ```
-   Watches `orchestrator.md`; fires when the Orchestrator's reply is addressed to
+   Watches `orchestrator.md`; emits when the Orchestrator's reply is addressed to
    `pending-<uuid>` (addressing filter: `→ $PROV_ID —`).
 
-3. **Wait.** The watcher exits and prints the ASSIGN-IDENTITY reply.
+3. **Wait.** The monitor stays armed and emits the ASSIGN-IDENTITY reply the moment
+   the Orchestrator posts it — no watcher exit, no separate file Read.
 
 4. **Adopt** the assigned name:
    ```bash
@@ -148,12 +181,13 @@ collision-free by construction.
      --provisional "$PROV_ID" --assigned impl-alpha --dir <coord-dir>
    ```
    Atomically renames `pending-<uuid>.md → impl-alpha.md` (POSIX `mv`, same dir).
-   Prints the provisional-watcher kill command and the re-arm command.
+   Prints the provisional-monitor kill command and the re-arm command.
 
-5. **Kill** provisional watcher (M2 — by PID, never `pkill -f`) and **re-arm**:
+5. **Kill** the provisional monitor (M2 — by PID, never `pkill -f`) and **re-arm**
+   under the adopted identity:
    ```bash
    kill $(cat <coord-dir>/.watch-state/$PROV_ID/watcher.pid)
-   ./watch-coordination.sh --identity impl-alpha --role implementer --dir <coord-dir>
+   ./coord-monitor.sh --identity impl-alpha --dir <coord-dir>
    ```
 
 6. **Post ACK** in `impl-alpha.md → orchestrator`: "Identity adopted. Armed in as impl-alpha."
@@ -196,11 +230,13 @@ The Orchestrator accepts direct re-registration without re-assigning.
 
 ---
 
-## The 5 Disaster Rules
+## The 6 Disaster Rules
 
-These are the rules whose violation causes the 5 most common coordination failures. Non-negotiable.
+These are the rules whose violation causes the most common coordination failures. Non-negotiable.
 
 **Rule 1 — Commit only explicit paths. Never `git add -A` or `git add .` in a shared tree.**
+
+> **MULTI-SEAT push discipline (ratified 2026-07-17, unanimous):** fetch origin <branch> -> no-divergence (origin is ancestor of HEAD) -> plain push; DIVERGED -> STOP + hub-coordinate, never rebase over a sibling's dirty tree. **NEVER pull --rebase --autostash** with two implementers -- autostash swallows the SIBLING's uncommitted work, and a mid-rebase churns it (near-miss 2026-07-17, WIP recovered). The rebase-refuses-a-dirty-tree behavior is the safe signal --autostash bypasses.
 Staging everything silently includes in-flight artifacts from a concurrent implementer's zone.
 
 **Rule 2 — Bracket shared-runtime changes in a DEPLOY WINDOW.**
@@ -212,14 +248,20 @@ Before touching a shared runtime: post `DEPLOY-WINDOW OPEN`. After: post `DEPLOY
 > - The Orchestrator may open a window directly (without a prior request) when it initiates the change itself.
 > Only the Orchestrator opens and closes windows on the shared channel. Spokes request; the hub broadcasts.
 
+> **Transport clause (ratified 2026-07-16, unanimous — after the DOCKPROX hot-sync incident):** the window covers **every mechanism that changes the shared runtime's executing code or schema** — restart, migration, scp/rsync onto a bind-mount, hot-reload pickup, exec-patching — regardless of how non-disruptive the transport feels. The sole carve-out is frontend HMR in your exclusive lane (HEADS-UP class). If the shared runtime will EXECUTE different code afterward, it needs the window — and gates+commit come first. Live-host proofs never belong in a worker's own definition-of-done; live proof happens AT the sanctioned window.
+
 **Rule 3 — Stay in your lane. Announce before crossing; wait for ACK.**
 Need to touch another instance's zone? Post a HEADS-UP, get an explicit ACK, then proceed. No silent cross-zone edits, ever.
 
 **Rule 4 — Read your mailbox before any commit, push, or deploy.**
-A message addressed to you may contain a decision that changes what you are about to do. The PreToolUse hook (git-pre-commit.sh) enforces this mechanically.
+A message addressed to you may contain a decision that changes what you are about to do. The PreToolUse hook (coordination-precommit-hook.sh) enforces this mechanically.
 
 **Rule 5 — Public docs only. No secrets in any mailbox.**
 The mailbox files are version-controlled. Never post credentials, tokens, internal paths, or PII. Treat every message as already public.
+
+**Rule 6 — A hot-deploy is committed code. (Ratified 2026-07-16, unanimous.)**
+Every scp / bind-mount / HMR hot-deploy to a shared runtime acquires a scoped commit **before the session ends — no exceptions**; the working tree is never the only home of live code. Cadence: commit per deploy-batch once the batch is feature-coherent. A batch mid-refinement (the human actively iterating on that exact surface) MAY defer consolidation to burst-end — never past session end — and the deferral is declared with a one-line `🛰️ HEADS-UP` so the hub knows live>git divergence exists at that moment.
+> Origin incident: the 2026-07-15/16 SOLO burst left ~65 live-deployed files — including an applied DB migration — existing only in a working tree. Amendment rationale: committing a mid-refinement intermediate forces a supersede + double-flag; feature-coherence gates the per-batch commit, session-end gates everything.
 
 ---
 
@@ -270,13 +312,17 @@ Lossless-mandate WOs inherit this proving standard automatically (see WORK-ORDER
 
 | File | Purpose |
 |------|---------|
-| `watch-coordination.sh` | Directory-based, identity-aware, echo-and-terminate watcher (STAR topology); named args `--identity`/`--role`/`--dir`; delta = newly appended bytes |
-| `heartbeat.sh` | Idle-poke + Orchestrator discover-on-idle trigger + watcher dead-man switch (v2.1: verifies watcher.pid liveness each cadence tick, 60s arm-grace, PID-reuse guard; on 3 consecutive dead ticks posts `⚠️ WATCHER-DOWN` and self-terminates `exit 42`, never auto-re-arms — see § Re-arm Rules); named args; 20min idle threshold, 300s cadence |
+| `coord-monitor.sh` | Persistent coordination monitor (STAR topology) — runs forever under the harness's output→chat bridge, no re-arm between messages; event-driven via `fswatch` with a poll-loop fallback; `--force-poll` skips fswatch for network-mounted coord-dirs (see § Network Filesystems); named args `--identity`/`--dir`/`--poll`/`--safety-poll`/`--force-poll`; delta = size-offset newly-appended bytes |
+| `coord-send.sh` | The publish half of the coordination chat-room — auto-fills timestamp/identity/header, appends atomically to your own outbox, reads the append back to verify it landed; named args `--to`/`--tag`/`--subject`/`--body`/`--body-file` |
+| `coord-status.sh` | Read-only liveness check — verifies the watcher (`coord-monitor.sh`) and heartbeat are BOTH alive; run after any re-arm before asserting it worked |
+| `heartbeat.sh` | Idle-poke + Orchestrator discover-on-idle trigger + watcher dead-man switch (v2.1: verifies watcher.pid liveness each cadence tick, 60s arm-grace, PID-reuse guard accepting either `coord-monitor.sh` or the retired `watch-coordination.sh`; on 3 consecutive dead ticks posts `⚠️ WATCHER-DOWN` and self-terminates `exit 42`, never auto-re-arms — see § Re-arm Rules); named args; 20min idle threshold, 300s cadence |
 | `6-lens-audit.md` | M5: 6-lens discovery methodology — when to run, all six lenses with what to look for, output format |
 | `MAILBOX-template.md` | Message grammar, tag types, atomic-write rules, archive hygiene |
 | `WORK-ORDER-template.md` | WO format (full + one-liner tiers) and STATUS reply |
 | `ROSTER-template.md` | Presence file schema (M9 richer fields); registration and deregistration |
 | `QUEUE-template.md` | Claimable queue, three-bucket SSOT, depth-floor, push-assignment rules |
-| `git-pre-commit.sh` | PreToolUse hook: mailbox-read gate, dangerous-verb warning, secret-scan |
+| `coordination-precommit-hook.sh` | PreToolUse hook for `git commit`/`push`/`rebase`: mailbox-read gate (Rule 4), dangerous-verb warning (`add -A`/`add .`/`commit -a`), non-blocking secret-scan; supports both the Claude Code JSON-stdin tool-input protocol and the Cursor `beforeShellExecution` allow/deny contract |
+| `retired/git-pre-commit.sh` | RETIRED — stale fork of the live hook under an old filename, superseded by `coordination-precommit-hook.sh`; kept for history only, see `retired/README.md` |
 | `bootstrap-identity.sh` | DESIGN EXTENSION: provisional-ID generation (`--provision`) and identity adoption (`--adopt`) for the naming handshake; see § Identity Bootstrap |
 | `advanced/sqlite-mcp.README.md` | Optional advanced path: SQLite(WAL) + stdio-MCP for atomic claim (M6) |
+| `retired/watch-coordination.sh` | RETIRED — echo-and-terminate one-shot watcher, superseded by `coord-monitor.sh`; kept for history only, see `retired/README.md` |

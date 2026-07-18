@@ -86,7 +86,7 @@ The GLOBAL tier is global — it does not travel with any single repo and persis
 
 - `okf-format.md` — Google's **Open Knowledge Format (OKF)** reference: the framework's canonical AI-knowledge format, markdown-native (Samantha can author/validate OKF concepts in any project from this reference)
 - `canonical-docs-system/` — Markdown-canon recipe + templates (hub-doc template, frontmatter schema, static-site config, index-generator + lint scripts)
-- `coordination-protocol/` — Orchestrator–Implementer protocol (mailbox/ROSTER/queue templates, watcher + heartbeat scripts, bootstrap checklist, 5 disaster-prevention rules)
+- `coordination-protocol/` — Orchestrator–Implementer protocol (mailbox/ROSTER/queue templates, coord-monitor/coord-send/coord-status/heartbeat scripts, bootstrap checklist, 6 disaster-prevention rules)
 - `adr-process/` — ADR + DECISIONS templates, lifecycle, index + supersession lint
 
 Each resource in the pack has a co-located `.example` template for adoption. Generic core; thin per-project overlay filled on first use.
