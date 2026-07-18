@@ -12,6 +12,8 @@ Namespace:
 - **`.claude/`** — harness-discovered files only: agent defs (`agents/`), skills (`skills/`), output-style (`output-styles/`), settings and hooks (`settings*.json`)
 - **`.samantha/`** — framework data and state: memory (`memory/`), agent memory (`agents/<name>/`), plans (`plans/`), specs (`specs/`), the Reference Pack (`references/`)
 
+**Deployment catalog.** Every downstream install of this framework is tracked in [`.samantha/DEPLOYMENTS.md`](.samantha/DEPLOYMENTS.md) — the map of *where* to propagate when canon changes here, the safe update procedure, and the per-site customizations to preserve. Read it before pushing an update outward; keep it current when you install into a new location.
+
 ---
 
 ## Adapting for New Projects
@@ -55,5 +57,8 @@ The skills are portfolio-portable as shipped. For deeper project integration:
 - `diagnose`: add project-specific investigation tracks
 - `build`: add project-specific stage checklists
 - `spec-check`: map the skill's audit categories to the project's actual spec structure
+
+**Step 6 — Register the deployment.**
+Add the new install to [`.samantha/DEPLOYMENTS.md`](.samantha/DEPLOYMENTS.md) — path, role (orchestrator / implementer / standalone), coordination generation + M9 identity, and any Project-Specific customization. An unregistered deployment is one a future canon update will silently miss.
 
 **What to leave unchanged.** The Samantha persona (identity, dispatch protocol, Constitution, always-on boundaries), agent personas (names, dispositions, behavioral fingerprints, output formats), memory conventions, the Reference Pack. Add new project-specific agents alongside the canonical six — don't modify the canonical ones.

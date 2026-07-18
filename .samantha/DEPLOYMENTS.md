@@ -1,0 +1,77 @@
+# Samantha Prime — Deployment Catalog
+
+**What this is.** A registry of every place the Samantha Prime framework (this repo) is installed downstream, so that when canon changes here we know exactly *where* to propagate and *what to watch for* at each site. This repo (`Claude_Samantha`) is the **canonical source**; every deployment derives from it.
+
+**Keep this current.** Update the table + change log whenever you install into a new location, migrate a coordination generation, or discover a per-site customization. A stale catalog is worse than none — it reads as "fully mapped" when it isn't.
+
+_Last verified: **2026-07-05**._
+
+---
+
+## Deployment map
+
+| Path | Role | Cluster | Coord | M9 identity | Git repo | Output-style | Customization to preserve |
+|------|------|---------|-------|-------------|----------|--------------|---------------------------|
+| `github/Claude_Samantha/` | **Canonical source** | — | none | — | yes | 263L (source of truth) | — |
+| `github/Nebuspace/` | Orchestrator | Nebuspace dual | M9 | `orchestrator` | no (workspace root) | 263L ✓ | none |
+| `github/Nebuspace/Sectorwars2102/` | Implementer | Nebuspace dual | M9 | `impl-sectorwars` | yes | 269L ✓ | **Project-Specific Context** — distilled Sectorwars specifics (Mac-vs-remote execution boundary, additive-only migrations, `dev`/`master` git workflow, Scroll Law, proving standard, `~/github/ServerSetup/` topology). MERGE, never blind-overwrite. |
+| `github/XelaNull/` | Orchestrator | XelaNull/pushling dual | M9 | `orchestrator` | no (workspace root) | 263L ✓ | none |
+| `github/XelaNull/pushling/` | Implementer | XelaNull/pushling dual | M9 | `impl-pushling` | yes | 284L ✓ | **Project-Specific Context** — build/run/reload/install cmds, embodiment pitfalls, **TS-500 `mcp/` code-quality overlay**. MERGE, never blind-overwrite. |
+| `github/AIBudget2026/` | **Standalone (solo)** | — (no coordination) | none | — | not git | 289L ✓ | **Project-Specific Context** — vanilla-JS/Python household-budget app, build/seed/serve cmds, **privacy-first pitfalls**. Also: `monk` + `cipher` extensions filled (cipher = PII/egress threat model); `CLAUDE.md` carries a solo-mode banner (existing rich project context preserved). **🔒 Holds real financial PII incl. minors — local-only, not git; sanitize/gitignore before any `git init`.** MERGE, never blind-overwrite. |
+
+**Coord-dirs (M9 star-topology, per cluster):**
+- Nebuspace dual → `/Users/mrathbone/github/Nebuspace/.samantha/coord/`
+- XelaNull/pushling dual → `/Users/mrathbone/github/XelaNull/.samantha/coord/`
+
+**Managed-but-NOT-installed** (the Nebuspace Orchestrator issues work orders into these sibling repos, but they carry no framework install of their own — no output-style, no agents; the Orchestrator instance runs from the Nebuspace root):
+- `github/Nebuspace/sw2102-bang/` — galaxy-generation sidecar
+- `github/Nebuspace/sw2102-docs/` — canonical game spec (**PUBLIC** — auto-deploys to Cloudflare on push to `main`; never write secrets/coordination chatter here)
+
+**Coordination generation:** both duals are on **M9 STAR-topology**. No gen-1 deployments remain (Nebuspace ran gen-1 until its 2026-07-05 migration; XelaNull/pushling was built on M9 from the start).
+
+---
+
+## What "the framework" is — the sync inventory
+
+When propagating an update, these are the artifacts that travel. Copy from `Claude_Samantha/` unless noted.
+
+| Artifact | Path | Notes |
+|----------|------|-------|
+| Persona (output-style) | `.claude/output-styles/samantha.md` | The **guaranteed** system-prompt layer — identity + operating rules. Does **not** cascade; each install needs the full file locally. Preserve any filled `## Project-Specific Context`. |
+| Agent defs (×6) | `.claude/agents/*.md` | monk, rook, mack, cipher, pixel, rosetta. Preserve any filled `## Project-Specific Extensions`. |
+| Skills (×16) | `.claude/skills/*/` | Portfolio-portable as shipped. |
+| Settings | `.claude/settings.json` | Sets `outputStyle`, wires the PreToolUse coordination hook. **The hook needs per-seat args** (see lessons). |
+| M9 coordination scripts | `.claude/coord-monitor.sh`, `coord-send.sh`, `coord-status.sh`, `heartbeat.sh`, `bootstrap-identity.sh`, `coordination-precommit-hook.sh` | Live copies at each **workspace root** (`Nebuspace/.claude/`, `XelaNull/.claude/`). Canonical source = `.samantha/references/coordination-protocol/`. Implementer sub-repos invoke the parent's copies by absolute path. `watch-coordination.sh` is RETIRED — superseded by the persistent `coord-monitor.sh`; kept only under `retired/` in the reference pack. |
+| Reference Pack | `.samantha/references/` | OKF format, coordination-protocol (M9), adr-process, canonical-docs-system, safety-carveouts, templates. |
+| Project context | `CLAUDE.md` | Per-project. Coordination section is M9 topology; the rest is project-specific — **author/preserve carefully**, don't blind-copy. |
+
+---
+
+## Update procedure (propagating a canon change)
+
+1. **Change canon here first** (`Claude_Samantha/`), commit, and merge to `main`. This repo is the source; deployments follow.
+2. **Classify the change:**
+   - **Additive file copies** — output-style, agents, skills, references. Safe to copy into a deployment even while its instances are live; they adopt it on **next restart**.
+   - **Replacing coordination deploy** — swapping the `.claude/*.sh` coordination scripts, or rewriting a `CLAUDE.md` coordination section, or migrating a coordination generation. This is **NOT** a safe hot-copy → **stop the instances first**, migrate, restart onto the new protocol.
+3. **Per deployment, before copying — read the lessons below**, then copy, then verify on disk.
+4. **After propagation:** instances pick up output-style / CLAUDE.md changes on their **next session start**. Note that in your report so the human knows a restart is required.
+
+### Hard-won lessons (do not relearn these the hard way)
+
+- **Check customizations before overwriting.** A filled `## Project-Specific Context` (pushling), an agent's `## Project-Specific Extensions`, a skill/code-quality overlay — a blind copy wipes them. Diff first (empty-template vs filled); **merge**, don't clobber. → `pushling` is the live example (its build commands + TS-500 overlay). _(memory: check-customizations-before-overwriting-deployed-framework)_
+- **Output-styles don't cascade.** Unlike `CLAUDE.md`, the output-style is a single selected file loaded from the nearest `.claude/output-styles/`. An implementer sub-repo does **not** inherit the workspace-root style — it needs the **full** persona locally (identity + all operating rules). Never split rules to the parent and assume inheritance (this was the original pushling install bug, fixed 2026-07-05).
+- **Stop live instances before a replacing coordination deploy.** Verify no live instance first (mailbox tail + running watchers). A live pair mid-work will have its coordination broken by a script/CLAUDE.md swap. _(memory: stop-live-instances-before-replacing-deploy)_
+- **Never run git in a live shared repo.** Copy files (safe); let the owning Orchestrator or the human do the commit. _(memory: no-git-ops-in-live-shared-repo)_
+- **The coordination hook needs per-seat args.** Wire `settings.json` as `<hook-path> <coord-dir> <this-seat's-identity>` (Orchestrator → `orchestrator`; Implementer → `impl-<name>`). Bare-path leaves the mailbox-read gate + roster dump silently skipped. _(memory: m9-hook-needs-args-per-seat)_
+
+---
+
+## Change log
+
+- **2026-07-18** — **watch-coordination.sh → coord-monitor.sh cutover completed across all deployments.** A fresh instance had armed the retired one-shot echo-and-terminate watcher after reading a stale reference pack, exposing that the coordination-protocol docs and reference packs still presented `watch-coordination.sh` as canonical everywhere except the live `Nebuspace/.claude/` scripts. Added `--force-poll` to `coord-monitor.sh` (network-mounted coord-dirs, where local fs-events never see a remote peer's write — live swap via atomic temp-then-`mv`, the running Nebuspace orchestrator monitor was never interrupted). Synced the current suite (`coord-monitor.sh`, `coord-send.sh`, `coord-status.sh`, `heartbeat.sh`, `bootstrap-identity.sh`, `coordination-precommit-hook.sh`) into `Nebuspace/.claude/`, `XelaNull/.claude/`, and all three `.samantha/references/coordination-protocol/` packs (Nebuspace, Claude_Samantha, XelaNull — including the previously-unsynced `XelaNull/pushling/.samantha/references/coordination-protocol/` copy). `watch-coordination.sh` retired to a `retired/` subdir with a tombstone README in every location it lived. Fixed the remaining prescriptive arming instructions in `Nebuspace`'s reference README, `XelaNull/CLAUDE.md`, and `XelaNull/pushling/CLAUDE.md` to the persistent arm-once-per-session model (no more "re-arm as your last action of a wake-cycle" — that was specific to the retired one-shot watcher). `XelaNull/.samantha/coord/CONTINUITY.md` and `QUEUE.md` were read and left untouched (historical/state records, not prescriptive). This row's `.claude/watch-coordination.sh` reference above is now historical only — see `retired/README.md` in any reference pack.
+- **2026-07-05** — **OKF reference accuracy fix.** Audited `okf-format.md` against Google's authoritative `okf/SPEC.md`: faithful except one over-hardened normative verb — the §4.1 extensibility clause said consumers "MUST NOT reject" unknown-field documents where the spec says "SHOULD NOT" (the MUST-NOT belongs only to the bundle-conformance clause, which was already correct). Corrected in canon + propagated the one-line fix to all 5 deployments (byte-identical OKF docs kept in sync).
+- **2026-07-05** — **AIBudget2026 standalone (solo) install.** First non-dual deployment: full framework (persona, 6 agents, 16 skills, reference pack, seeded memory) with **zero coordination wiring** — settings = `{"outputStyle":"Samantha"}` only, no coord-dir, no scripts, no precommit hook, no dual-instance CLAUDE.md section (the reference pack's coordination-protocol travels along inert, available if it ever goes dual). Filled the output-style Project-Specific Context + `monk`/`cipher` agent extensions; added a non-destructive solo-mode banner to the existing `CLAUDE.md`. **Privacy-flagged:** repo holds real financial PII incl. minors, is local-only + not git — sanitize/gitignore before any `git init`.
+- **2026-07-05** — **Nebuspace dual migrated gen-1 → M9.** Installed M9 scripts (dead-man switch, singleton guard) into `Nebuspace/.claude/`; created `Nebuspace/.samantha/coord/`; rewrote both `CLAUDE.md` coordination sections to M9 STAR; wired the precommit hook per-seat (`orchestrator` / `impl-sectorwars`); archived the gen-1 mailbox + ROSTER (`ROSTER.gen1-archive.md`, `Sectorwars2102/CROSS-CLAUDE.gen1-archive.md`). Output-style + references synced to 263L.
+- **2026-07-05** — **XelaNull/pushling dual hardened.** Fixed the Orchestrator hook (bare-path → args) and added the missing Implementer hook (`pushling/.claude/settings.json`, `impl-pushling`). Resynced output-styles: XelaNull 263L (clean), pushling 284L (**merged** — full canon body + preserved Project-Specific Context; removed the obsolete "promoted to framework, not duplicated here" note that had left pushling running without the Standing Working Rules).
+- **2026-07-05** — **Implementer parity closed.** Filled Sectorwars2102's output-style `## Project-Specific Context` (269L) — distilled from its own `CLAUDE.md` — so the Nebuspace dual's Implementer now matches the XelaNull dual's (pushling) in carrying its project overlay in the always-on persona layer, not just in `CLAUDE.md`. Orchestrator roots correctly stay empty on both duals.
+- **_(earlier, 2026-07)_** — OKF adopted as canonical AI-knowledge format (replaced `.aispec`) and propagated; pushling full install; XelaNull dual setup built on M9; coordination hardening merged (PR#1 heartbeat v2.1, PR#2 watcher v2.2 singleton guard); persona: Standing Working Rules always-on + Reference Library (OKF progressive-disclosure) pointer.

@@ -25,7 +25,7 @@ A **concept** is one UTF-8 Markdown (`.md`) file with two mandatory parts:
 - `tags` — a YAML list for cross-cutting categorization.
 - `timestamp` — ISO-8601 datetime of the last meaningful change.
 
-**Extension:** producers may add any key/value pairs. Consumers SHOULD preserve unknown keys when round-tripping and MUST NOT reject a document for unrecognized fields.
+**Extension:** producers MAY add any key/value pairs. Consumers SHOULD preserve unknown keys when round-tripping and SHOULD NOT reject a document for unrecognized fields. *(The stricter MUST-NOT-reject rule applies at the bundle-conformance level — see Conformance below.)*
 
 ### Body — conventional section headings
 
