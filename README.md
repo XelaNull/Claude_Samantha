@@ -1,6 +1,6 @@
 # Samantha Prime — Multi-Agent Framework for Claude Code & Cursor
 
-**Version: 2.2.0** | **Last Updated: 2026-08-03** | **Min Claude Code: v2.1.77+**
+**Version: 2.2.1** | **Last Updated: 2026-08-03** | **Min Claude Code: v2.1.77+**
 
 This repository contains the canonical definitions for the **Samantha Prime** multi-agent framework. Copy it into any project to activate Samantha as the primary session agent — co-creator, project manager, adversarial reviewer, and quality gate.
 
@@ -106,6 +106,26 @@ Each resource in the pack has a co-located `.example` template for adoption. Gen
 | **Dual** | Two+ Claude Code instances coordinating via file-based mailbox (watchers + heartbeats + ROSTER) | Peer instance (full session; spawns its own subagents) |
 
 Solo covers most work. In solo, Samantha spawns Monk as a background subagent (non-blocking) and continues dialogue via `SendMessage` to the same agent thread. Go dual when the task must survive compaction, needs separate context windows, or requires genuinely parallel long-lived workstreams. In dual, coordination runs over flat files — a per-repo mailbox, a ROSTER presence board, and watcher/heartbeat scripts. Both topologies run the same work-order lifecycle; only the transport layer changes.
+
+#### Dual mode is a STAR, not a mesh
+
+```
+               ┌─────────────────────────────┐
+               │    <coord-dir>/             │
+               │    orchestrator.md  (hub)   │
+               │    impl-alpha.md    (spoke) │
+               │    impl-beta.md     (spoke) │
+               └─────────────────────────────┘
+                           │
+          ┌────────────────┼────────────────┐
+          ▼                ▼                ▼
+   Orchestrator       impl-alpha        impl-beta
+   watches ALL         watches          watches
+   files except        orchestrator.md  orchestrator.md
+   its own             ONLY             ONLY
+```
+
+Each instance owns and writes exactly **one** file in the coord-dir — that file is both its presence entry and its outbox. The Orchestrator (hub) watches every spoke file; each Implementer (spoke) watches only the Orchestrator's file, its inbox for handoffs and decisions. There is no spoke-to-spoke watching and no self-watching — this is structural, not a convention someone can forget. Writes are append-only, so there's exactly one writer per file at all times: no locking, no merge conflicts, no lost updates. This is also how the topology scales to one Orchestrator coordinating *multiple* downstream projects at once — see coordination-protocol's [`## Multi-project coordination`](.samantha/references/coordination-protocol/README.md#multi-project-coordination) for the per-repo queue + zone-routing extension.
 
 ---
 
@@ -534,6 +554,7 @@ Skills MUST be named `SKILL.md` (uppercase, exact match). Claude Code auto-disco
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 2.2.1 | 2026-08-03 | **STAR-topology + multi-project coordination documentation gap fix** — top-level README skimmers previously had no mental model of dual-mode's hub/spoke shape; added an ASCII-diagrammed "Dual mode is a STAR, not a mesh" subsection under Deployment Topologies (single-writer-per-file, hub-watches-all/spoke-watches-hub-only, no spoke-to-spoke/self-watching) plus a pointer to the reference pack's fuller treatment. Also added the previously-undocumented `## Multi-project coordination` section to `coordination-protocol/README.md` (hub-only project board, per-repo `queue-<repo>.md` files, `impl-<repo>` identity/zone-routing SSOT, cwd/zone-mismatch STOP, sub-repo lane splits) — a pattern already in live use downstream but never generalized back into the framework, leaving a dangling citation to a section that didn't exist. Docs-only; no behavior change. |
 | 2.2.0 | 2026-08-03 | **Coordination-protocol robustness amendment** backported from a live Nebuspace ratification cycle (PROTOCOL-VERSION 1.0.0 → 1.1.0): row-hygiene columns for queue templates (`gated`/`schema`/`verified-against`, three distinct gate kinds — code-comment marker, standing safety-list membership, canon-prose gate), the evidence rule (no coord-dir claim about external-artifact state without literal, freshly-fetched, tool-output-shaped evidence fetched in the same action as the claim), and new mechanized tooling: `coord-protocol-metrics.sh`, `coord-session-healthcheck.sh`, `coord-evidence-lint.sh`, `coord-gate-audit.sh`, a queue-depth heartbeat tick, and a fail-closed gated-push guard + reverse-index advisory in the precommit hook. Also fixed a pre-existing leak — `coord-status.sh`/`coord-send.sh`/`coord-monitor.sh` hardcoded an absolute deployment-specific path as their default coord-dir; now `${COORD_DIR:-$PWD/.samantha/coord}`. |
 | 2.1.1 | 2026-07-23 | **Cursor persona bridge** — Cursor ignores Claude Code `outputStyle` / `.claude/output-styles/`; install now generates Always Apply `.cursor/rules/samantha.mdc` from the output-style via `.samantha/references/templates/sync-cursor-persona.sh` (single source of truth preserved). Docs + DEPLOYMENTS inventory updated; rolled out to all registered deployments. |
 | 2.1.0 | 2026-07-18 | Adopted OKF (Open Knowledge Format) as the canonical AI-knowledge format, replacing `.aispec` (new `okf-format.md` reference, docs-system re-architected around OKF's `type` field, new `okf` skill, Reference Library progressive-disclosure pointer); framework polish (new `audit` skill restoring NEON's Discover stage, `review`→`change-review` / `security-review`→`threat-audit` renames to avoid built-in-command clashes, activation banners on all skills, memory-tier rename SELF→GLOBAL with first-adoption seeding, install/docs hygiene); ported the 9 human-ratified Standing Working Rules to framework level in the output-style, retiring stale color-gate references; coordination-protocol hardening — heartbeat v2.1 sustained-absence dead-man switch, watch-coordination v2.2 singleton guard (idempotent re-arm, no more orphaned watchers), early-arm rule for long wake-cycles, `QUEUE.md` excluded from the hub's watch-set, MAILBOX/ROSTER/WORK-ORDER template hardening (true-EOF append, PID-refresh, proving-standard inheritance), a git-pre-commit unread-count exit-status bugfix; added the parallel-safety PAR-tag methodology (`PARALLEL-SAFETY.md`: Cell/spine/blast-radius grading for build-wave fan-out, WORK-ORDER/QUEUE template hooks); added `.samantha/DEPLOYMENTS.md` (per-deployment tracking + change log) and an OKF conformance correction; synced the coordination-protocol reference pack to the live M9 tooling — `coord-monitor.sh --force-poll` for network-mounted coord-dirs, retired `watch-coordination.sh` and a stale `git-pre-commit.sh` hook fork to `retired/` with tombstones (both superseded by the correctly-named `coordination-precommit-hook.sh`), fixed prescriptive arming instructions. Not a protocol-generation bump — the gen-1 → M9 coordination migration itself shipped 2026-07-05 (see `DEPLOYMENTS.md`); this release captures everything landed since 2.0.0. |

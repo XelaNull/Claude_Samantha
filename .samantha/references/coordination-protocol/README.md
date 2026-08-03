@@ -48,6 +48,21 @@ Otherwise: **stay in solo mode** (background subagents via `run_in_background`).
 
 ---
 
+## Multi-project coordination
+
+The STAR topology above assumes one Orchestrator coordinating spokes inside a single downstream project. When one Orchestrator instance coordinates **multiple independent downstream repos/projects at once**, extend the same topology rather than replacing it:
+
+- **A hub-only board** (e.g. `PROJECTS.md` in the coord-dir) tracks every active downstream repo/project — its tip/branch, its seats, and its state — in one place. Only the Orchestrator writes it; spokes don't watch it.
+- **Per-repo queues, not one global queue.** Instead of a single flat work queue, each downstream repo gets its own queue file (e.g. `queue-<repo>.md`), so claimable work stays scoped and readable per project instead of interleaved across unrelated codebases.
+- **Identity stem = the repo/lane a spoke owns.** An Implementer's identity is derived from the project or path-lane it's responsible for (e.g. `impl-<repo>`, or `impl-<repo>-<lane>` on a sub-repo split), and its presence-file `zone` field (see ROSTER-template.md) declares the owned path glob(s) or repo root.
+- **Zone is routing source-of-truth.** A HANDOFF is only valid if the work order's target paths are a subset of the recipient's declared `zone`. The Orchestrator checks this before posting any product work order — never assume a spoke owns paths just because it answered fastest or was the last one dispatched.
+- **cwd/zone mismatch STOPs the hub.** If a spoke's declared `zone` disagrees with what its identity filename implies (e.g. `impl-<repo>` whose `zone` doesn't resolve inside `<repo>`), the Orchestrator halts and rezones that spoke before posting any product work order to it — a silent mismatch means work could land in the wrong repo or on a seat that doesn't own it.
+- **Sub-repo lane splits inherit the same rule.** A single downstream repo can itself split into multiple Implementer seats on disjoint path lanes (e.g. a frontend lane and a backend lane within one repo) — each still gets its own identity and declared `zone`, checked the same way. Multi-project support is really "zone precision, applied at whatever granularity the deployment needs" — repo-level or lane-level.
+
+The STAR invariants (single-writer-per-file, hub watches all spokes, spokes watch only the hub, no spoke-to-spoke watching) are unchanged — multi-project just adds a routing layer (`zone` + per-repo queues + a hub board) on top so one hub can safely fan out across more than one codebase.
+
+---
+
 ## Bootstrap Checklist
 
 Run these steps in order when standing up a new dual session.
@@ -381,7 +396,7 @@ Lossless-mandate WOs inherit this proving standard automatically (see WORK-ORDER
 | `MAILBOX-template.md` | Message grammar, tag types, atomic-write rules, archive hygiene |
 | `WORK-ORDER-template.md` | WO format (full + one-liner tiers) and STATUS reply |
 | `ROSTER-template.md` | Presence file schema (M9 richer fields); registration and deregistration |
-| `QUEUE-template.md` | Claimable queue, three-bucket SSOT, depth-floor, push-assignment rules |
+| `QUEUE-template.md` | Claimable queue, three-bucket SSOT, depth-floor, push-assignment rules; in multi-project deployments, instantiate one queue per downstream repo (`queue-<repo>.md`) — see § Multi-project coordination |
 | `coordination-precommit-hook.sh` | PreToolUse hook for `git commit`/`push`/`rebase`: mailbox-read gate (Rule 4), dangerous-verb warning (`add -A`/`add .`/`commit -a`), non-blocking secret-scan; supports both the Claude Code JSON-stdin tool-input protocol and the Cursor `beforeShellExecution` allow/deny contract |
 | `retired/git-pre-commit.sh` | RETIRED — stale fork of the live hook under an old filename, superseded by `coordination-precommit-hook.sh`; kept for history only, see `retired/README.md` |
 | `bootstrap-identity.sh` | DESIGN EXTENSION: provisional-ID generation (`--provision`) and identity adoption (`--adopt`) for the naming handshake; see § Identity Bootstrap |
