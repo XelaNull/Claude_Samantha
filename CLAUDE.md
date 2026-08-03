@@ -13,7 +13,7 @@ Namespace:
 - **`.cursor/rules/`** — Cursor Always Apply bridge for the persona (`samantha.mdc`, generated from the output-style — do not hand-edit)
 - **`.samantha/`** — framework data and state: memory (`memory/`), agent memory (`agents/<name>/`), plans (`plans/`), specs (`specs/`), the Reference Pack (`references/`)
 
-**Deployment catalog.** Every downstream install of this framework is tracked in [`.samantha/DEPLOYMENTS.md`](.samantha/DEPLOYMENTS.md) — the map of *where* to propagate when canon changes here, the safe update procedure, and the per-site customizations to preserve. Read it before pushing an update outward; keep it current when you install into a new location.
+**Deployment catalog (local only).** Downstream installs for *this* maintainer are tracked in `.samantha/DEPLOYMENTS.md` — gitignored, never published. Read it before pushing an update outward; keep it current when you install into a new location. Other adopters keep their own private map (or skip it).
 
 ---
 
@@ -67,7 +67,7 @@ The skills are portfolio-portable as shipped. For deeper project integration:
 - `build`: add project-specific stage checklists
 - `spec-check`: map the skill's audit categories to the project's actual spec structure
 
-**Step 6 — Register the deployment.**
-Add the new install to [`.samantha/DEPLOYMENTS.md`](.samantha/DEPLOYMENTS.md) — path, role (orchestrator / implementer / standalone), coordination generation + M9 identity, and any Project-Specific customization. An unregistered deployment is one a future canon update will silently miss.
+**Step 6 — Register the deployment (maintainer private catalog).**
+If you keep a local `.samantha/DEPLOYMENTS.md` (gitignored here), add the new install — path, role (orchestrator / implementer / standalone), coordination generation + M9 identity, and any Project-Specific customization. An unregistered deployment is one a future canon update will silently miss.
 
 **What to leave unchanged.** The Samantha persona (identity, dispatch protocol, Constitution, always-on boundaries), agent personas (names, dispositions, behavioral fingerprints, output formats), memory conventions, the Reference Pack. Add new project-specific agents alongside the canonical six — don't modify the canonical ones.

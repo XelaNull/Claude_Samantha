@@ -13,6 +13,9 @@
 !.samantha/agents/*/.gitkeep
 .samantha/plan.md
 
+# Private deployment map (local paths / site customizations) — not for the public tree.
+.samantha/DEPLOYMENTS.md
+
 # Editor / OS junk
 *.code-workspace
 .DS_Store
