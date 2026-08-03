@@ -1,6 +1,6 @@
 # Samantha Prime — Project Context
 
-**Samantha's persona** — source of truth is `.claude/output-styles/samantha.md`. **Claude Code** auto-loads it via `.claude/settings.json` (`outputStyle: Samantha`). **Cursor** ignores `outputStyle`; it loads the generated Always Apply rule `.cursor/rules/samantha.mdc` (sync with `.samantha/references/templates/sync-cursor-persona.sh` after editing the output-style). This file is project context + the adoption guide — not her identity.
+**Samantha's persona** — source of truth is `.claude/output-styles/samantha.md`. **Claude Code** auto-loads it via `.claude/settings.json` (`outputStyle: Samantha`). **Cursor** ignores `outputStyle`; it loads the generated Always Apply rule `.cursor/rules/samantha.mdc`. **Agents** — source of truth is `.claude/agents/*.md`; Cursor prefers generated `.cursor/agents/*.md` (model aliases mapped). Regenerate both bridges with `.samantha/references/templates/sync-cursor.sh` after editing the output-style or any agent. This file is project context + the adoption guide — not her identity.
 
 ---
 
@@ -11,6 +11,7 @@ This is the **canonical Samantha Prime framework** — the portable orchestrator
 Namespace:
 - **`.claude/`** — harness-discovered files only: agent defs (`agents/`), skills (`skills/`), output-style (`output-styles/`), settings and hooks (`settings*.json`)
 - **`.cursor/rules/`** — Cursor Always Apply bridge for the persona (`samantha.mdc`, generated from the output-style — do not hand-edit)
+- **`.cursor/agents/`** — Cursor subagent bridge (generated from `.claude/agents/` — do not hand-edit)
 - **`.samantha/`** — framework data and state: memory (`memory/`), agent memory (`agents/<name>/`), plans (`plans/`), specs (`specs/`), the Reference Pack (`references/`)
 
 **Deployment catalog (local only).** Downstream installs for *this* maintainer are tracked in `.samantha/DEPLOYMENTS.md` — gitignored, never published. Read it before pushing an update outward; keep it current when you install into a new location. Other adopters keep their own private map (or skip it).
@@ -27,15 +28,15 @@ Copy these directories from this repo into the new project's root:
 - `.claude/skills/` — all skill files
 - `.claude/output-styles/` — the Samantha persona (source of truth)
 - `.claude/settings.json` — sets `outputStyle: Samantha` as the project default (Claude Code)
-- `.samantha/references/` — the Reference Pack (coordination protocol, ADR process, OKF format, docs-system recipe; includes `templates/sync-cursor-persona.sh`)
+- `.samantha/references/` — the Reference Pack (coordination protocol, ADR process, OKF format, docs-system recipe; includes `templates/sync-cursor.sh`)
 - `.samantha/agents/` — per-agent memory directories (the `.example` template only; see Step 2)
 - `.samantha/memory/` — project memory directory (the `.example` template only; see Step 2)
 
-Then generate the Cursor persona bridge from the output-style (required for Cursor Agent; harmless on Claude Code-only installs):
+Then generate the Cursor bridges (persona + agents — required for Cursor Agent; harmless on Claude Code-only installs):
 ```bash
-bash .samantha/references/templates/sync-cursor-persona.sh .
+bash .samantha/references/templates/sync-cursor.sh .
 ```
-That writes `.cursor/rules/samantha.mdc` (`alwaysApply: true`). Re-run after any edit to the output-style's `## Project-Specific Context`.
+That writes `.cursor/rules/samantha.mdc` (`alwaysApply: true`) and `.cursor/agents/*.md` (Cursor model IDs + `readonly`). Re-run after any edit to the output-style's `## Project-Specific Context` or to any `.claude/agents/*.md`. Never hand-edit the generated Cursor files.
 
 Copy `.claude/settings.local.json` only if the new project needs the same hooks; otherwise create a fresh one.
 
@@ -52,7 +53,7 @@ Open `.claude/output-styles/samantha.md` and fill in the `## Project-Specific Co
 - Build / test / lint commands
 - Key patterns, pitfalls, project-specific reminders
 
-Then re-run `bash .samantha/references/templates/sync-cursor-persona.sh .` so the Cursor Always Apply rule picks up the overlay. Never hand-edit `.cursor/rules/samantha.mdc`.
+Then re-run `bash .samantha/references/templates/sync-cursor.sh .` so the Cursor Always Apply rule picks up the overlay. Never hand-edit `.cursor/rules/samantha.mdc`.
 
 **Step 4 — Customize the agents.**
 In each `.claude/agents/*.md`, fill in the `## Project-Specific Extensions` section:
@@ -60,6 +61,8 @@ In each `.claude/agents/*.md`, fill in the `## Project-Specific Extensions` sect
 - `mack.md`: project-specific threat model (what can careless concurrent users break?)
 - `cipher.md`: project-specific attack surface (auth flow, data boundaries, API surface)
 - `pixel.md` / `rosetta.md`: only if the project has specific UI/i18n conventions
+
+Then re-run `bash .samantha/references/templates/sync-cursor-agents.sh .` (or `sync-cursor.sh`) so Cursor picks up the overlays.
 
 **Step 5 — Customize the skills (optional).**
 The skills are portfolio-portable as shipped. For deeper project integration:
