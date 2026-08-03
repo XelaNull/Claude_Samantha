@@ -1,12 +1,12 @@
 ---
 name: spec-check
-description: Use when the human asks about spec compliance, feature completeness, or alignment with design documents. I audit the spec against the codebase and build what's missing.
+description: "Spec↔code compliance audit that builds what's missing until alignment. Use when the user asks about spec compliance, feature completeness, design-doc alignment, or whether the code matches the spec."
 user-invocable: true
 ---
 
 # SPEC-CHECK -- Spec Compliance & Construction
 
-**Activation banner.** The instant this skill engages, I open my reply with this banner — emitted as raw lines, NOT inside a code fence — then proceed:
+**Activation banner (REQUIRED — first output).** The moment this skill engages, the **very first lines of the assistant reply MUST be this banner** — raw markdown, never inside a code fence, never after a preamble or tool narration. If the banner is missing, the skill did not engage.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 📋 **SKILL · SPEC-CHECK** — spec ↔ code compliance

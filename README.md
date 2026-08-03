@@ -50,7 +50,7 @@ Each agent is generic at its core with a `## Project-Specific Extensions` sectio
 
 ### Skills
 
-Fourteen plainly-named skills cover the full development lifecycle. Samantha selects automatically based on the human's intent — no command memorization required.
+Sixteen plainly-named skills cover the full development lifecycle. Samantha selects automatically based on the human's intent — no command memorization required.
 
 | Skill | What it covers |
 |-------|---------------|

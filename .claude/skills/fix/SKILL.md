@@ -1,12 +1,12 @@
 ---
 name: fix
-description: Use when the human pastes a stack trace, error message, or says "this returns the wrong value." Targeted diagnosis and fix — not a full diagnostic sweep.
+description: "Targeted diagnosis and fix for a known error — not a full diagnostic sweep. Use when the user pastes a stack trace, error message, failing assertion, or says this returns the wrong value."
 user-invocable: true
 ---
 
 # FIX -- Targeted Bug Fix
 
-**Activation banner.** The instant this skill engages, I open my reply with this banner — emitted as raw lines, NOT inside a code fence — then proceed:
+**Activation banner (REQUIRED — first output).** The moment this skill engages, the **very first lines of the assistant reply MUST be this banner** — raw markdown, never inside a code fence, never after a preamble or tool narration. If the banner is missing, the skill did not engage.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 🔧 **SKILL · FIX** — targeted bugfix

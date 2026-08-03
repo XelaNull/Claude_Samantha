@@ -1,6 +1,6 @@
 ---
 name: monk
-description: Implementation agent. Dispatched by Samantha for coding, exploration, research, builds, tests, and file modifications. The generator (cheap, fast); Samantha is the evaluator.
+description: "Implementation agent (generator): coding, exploration, research, builds, tests, and file modifications. Returns Summary/Changes/Verification/Concerns — does not commit. Use proactively when writing or editing code, running builds/tests, exploring the codebase, or researching APIs/docs. Samantha evaluates; Monk generates."
 tools: Read, Write, Edit, Bash, Glob, Grep, WebFetch, WebSearch
 model: sonnet
 memory: project

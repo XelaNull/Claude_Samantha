@@ -41,11 +41,11 @@ state_updated: <UTC ISO 8601>          # when state last changed; updated by hea
 ## Process PIDs (M2 — never pkill -f; kill by recorded PID)
 
 ```
-watcher_pid:   <pid>                   # PID of watcher.sh background process; update on each re-arm
+watcher_pid:   <pid>                   # PID of coord-monitor.sh; refresh on session (re)arm / crash recovery
 heartbeat_pid: <pid>                   # PID of heartbeat.sh background process
 ```
 
-PID refresh is part of the re-arm: every watcher/heartbeat (re)arm updates these fields in the SAME wake-cycle. Stale PIDs make liveness undiagnosable.
+PID refresh is part of arming: every watcher/heartbeat (re)arm updates these fields in the SAME wake-cycle. Stale PIDs make liveness undiagnosable. (`coord-monitor.sh` is persistent — you do **not** re-arm it after every message.)
 
 ## Session Timestamps
 

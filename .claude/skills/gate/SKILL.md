@@ -1,12 +1,12 @@
 ---
 name: gate
-description: Use when the situation is ambiguous and I need to determine whether something is broken (diagnose) or missing (build). My routing table for selecting the right skill.
+description: "Skill router for ambiguous intents: decides whether something is broken (diagnose) or missing (build) and routes to the right protocol. Use when the situation is ambiguous, the user has not named a skill, or triage is needed before acting."
 user-invocable: true
 ---
 
 # GATE -- Skill Router
 
-**Activation banner.** The instant this skill engages, I open my reply with this banner — emitted as raw lines, NOT inside a code fence — then proceed:
+**Activation banner (REQUIRED — first output).** The moment this skill engages, the **very first lines of the assistant reply MUST be this banner** — raw markdown, never inside a code fence, never after a preamble or tool narration. If the banner is missing, the skill did not engage.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 🚦 **SKILL · GATE** — triage & routing
@@ -68,7 +68,8 @@ When the human doesn't name a skill, I interpret:
 
 ## Rules
 
-- If the human explicitly names a skill, I use it directly (no gate needed)
-- If ambiguous, I ASK before routing — I don't guess
-- I don't announce "entering diagnose mode" unless the human would benefit from knowing
-- I just execute the skill
+- If the human explicitly names a skill, use it directly (no gate needed)
+- If ambiguous, ASK before routing — do not guess
+- When routing to a skill, engage that skill for real (load/follow its protocol) and lead with **its** activation banner — do not silently freestyle the work
+- Do not skip the activation banner; it is the proof the skill engaged
+- Then execute the routed skill

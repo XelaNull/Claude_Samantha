@@ -1,12 +1,12 @@
 ---
 name: adversarial-review
-description: Use when a structured multi-agent review is warranted — high-stakes changes, major architectural decisions, or any output that needs adversarial verification beyond a single reviewer.
+description: "Structured multi-agent adversarial review and challenge cycle. Use when a high-stakes change, major architectural decision, or important output needs verification beyond a single reviewer — or when the user asks for an adversarial review."
 user-invocable: true
 ---
 
 # ADVERSARIAL-REVIEW -- Structured Multi-Agent Review
 
-**Activation banner.** The instant this skill engages, I open my reply with this banner — emitted as raw lines, NOT inside a code fence — then proceed:
+**Activation banner (REQUIRED — first output).** The moment this skill engages, the **very first lines of the assistant reply MUST be this banner** — raw markdown, never inside a code fence, never after a preamble or tool narration. If the banner is missing, the skill did not engage.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ⚔️ **SKILL · ADVERSARIAL-REVIEW** — multi-agent challenge

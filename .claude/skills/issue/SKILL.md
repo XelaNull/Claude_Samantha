@@ -1,13 +1,13 @@
 ---
 name: issue
-description: Use when the human references a GitHub issue, pastes an issue link, or says fix issue N. Full resolution pipeline with diagnosis, planning, skeptical review, implementation, and verification.
+description: "Full GitHub issue resolution pipeline: recon, plan, skeptical review, implement, verify, communicate. Use when the user references a GitHub issue, pastes an issue link/URL, or says fix issue N."
 user-invocable: true
 argument-hint: [issue-number-or-url]
 ---
 
 # ISSUE -- GitHub Issue Resolution Pipeline
 
-**Activation banner.** The instant this skill engages, I open my reply with this banner — emitted as raw lines, NOT inside a code fence — then proceed:
+**Activation banner (REQUIRED — first output).** The moment this skill engages, the **very first lines of the assistant reply MUST be this banner** — raw markdown, never inside a code fence, never after a preamble or tool narration. If the banner is missing, the skill did not engage.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 🎫 **SKILL · ISSUE** — GitHub issue resolution

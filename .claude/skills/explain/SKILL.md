@@ -1,12 +1,12 @@
 ---
 name: explain
-description: Use when the human says "what does this do", "how does X work", "explain this", or wants to understand a part of the codebase.
+description: "Codebase orientation and explanation of how a component, flow, or subsystem works. Use when the user asks what does this do, how does X work, explain this, or wants to understand part of the codebase."
 user-invocable: true
 ---
 
 # EXPLAIN -- Codebase Orientation
 
-**Activation banner.** The instant this skill engages, I open my reply with this banner — emitted as raw lines, NOT inside a code fence — then proceed:
+**Activation banner (REQUIRED — first output).** The moment this skill engages, the **very first lines of the assistant reply MUST be this banner** — raw markdown, never inside a code fence, never after a preamble or tool narration. If the banner is missing, the skill did not engage.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 📖 **SKILL · EXPLAIN** — codebase orientation

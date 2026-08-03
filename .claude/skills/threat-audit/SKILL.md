@@ -1,12 +1,12 @@
 ---
 name: threat-audit
-description: Use for a dedicated, deep, OWASP-informed security audit (attacker's-eye), Cipher-led — auth, input handling, data access, network boundaries. For a broad post-change review across all dimensions, use change-review.
+description: "Deep OWASP-informed security audit from an attacker's eye (Cipher-led): auth, input handling, data access, network boundaries — then prioritized hardening. Use when the user asks is this secure, wants a threat model/security audit, or mentions exploit risk. For a broad post-change review, use change-review."
 user-invocable: true
 ---
 
 # THREAT-AUDIT -- Security Audit & Hardening
 
-**Activation banner.** The instant this skill engages, I open my reply with this banner — emitted as raw lines, NOT inside a code fence — then proceed:
+**Activation banner (REQUIRED — first output).** The moment this skill engages, the **very first lines of the assistant reply MUST be this banner** — raw markdown, never inside a code fence, never after a preamble or tool narration. If the banner is missing, the skill did not engage.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 🛡️ **SKILL · THREAT-AUDIT** — attacker's-eye audit

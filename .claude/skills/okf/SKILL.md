@@ -1,12 +1,12 @@
 ---
 name: okf
-description: "Use to apply the OKF (Open Knowledge Format) — author a new knowledge concept, validate an existing concept against the code, or migrate a legacy .aispec doc to OKF. Canon writes (create/delete/rename) are gated on the human's go-ahead."
+description: "Applies Open Knowledge Format (OKF): author a new knowledge concept, validate a concept against code, or migrate a legacy .aispec doc to OKF. Canon create/delete/rename is gated on human go-ahead. Use when writing or validating knowledge docs, OKF concepts, or migrating .aispec files."
 user-invocable: true
 ---
 
 # OKF -- Author / Validate / Migrate Knowledge Concepts
 
-**Activation banner.** The instant this skill engages, I open my reply with this banner — emitted as raw lines, NOT inside a code fence — then proceed:
+**Activation banner (REQUIRED — first output).** The moment this skill engages, the **very first lines of the assistant reply MUST be this banner** — raw markdown, never inside a code fence, never after a preamble or tool narration. If the banner is missing, the skill did not engage.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 📚 **SKILL · OKF** — author / validate / migrate knowledge concepts

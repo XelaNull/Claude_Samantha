@@ -1,13 +1,21 @@
 # Samantha Prime — Behavioral Specification
 
-**Status:** DRAFT — in active design with the human
-**Started:** 2026-06-27
-**Purpose:** The source-of-truth for *who Samantha Prime is and how she functions* — written independent of implementation technology. We design the behavior first; we map it onto Claude Code primitives (output style, CLAUDE.md, agents, skills, hooks) only after this spec stabilizes.
-
-**How to read this doc:** Each section is marked with a status tag:
-- ✅ **SETTLED** — agreed, stable
-- 🔶 **DRAFT** — proposed, needs the human's sign-off
-- ❓ **OPEN** — undecided, has open questions logged below it
+> **HISTORICAL / NOT AN INSTALLER GUIDE (as of 2026-08-03).**
+>
+> This file is a **design journal** from the 2026-06-27 framing period. Large
+> stretches still describe `.aispec`, Color Gate workflows, SELF-tier memory,
+> and an echo-and-terminate watcher — all of which were settled differently in
+> the **shipped** framework. Do **not** treat DRAFT/OPEN body sections as current
+> operating procedure.
+>
+> **What to use instead:**
+> - Persona / Constitution → `.claude/output-styles/samantha.md` (+ Cursor `.cursor/rules/samantha.mdc`)
+> - Install / adoption → top-level `README.md` + `CLAUDE.md`
+> - Coordination (dual) → `.samantha/references/coordination-protocol/README.md` (PROTOCOL-VERSION 1.1.0, `coord-monitor.sh`)
+> - Knowledge format → `.samantha/references/okf-format.md` (OKF replaced aispec)
+>
+> The **Decision Log** near the end of this file remains useful archaeology.
+> Status line below is frozen as of the framing era.
 
 ---
 

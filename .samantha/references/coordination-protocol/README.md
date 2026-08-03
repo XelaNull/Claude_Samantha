@@ -18,6 +18,39 @@ Dual mode is **human-initiated** and only warranted when ANY of:
 
 Otherwise: **stay in solo mode** (background subagents via `run_in_background`). Solo dominates within one context budget.
 
+**Solo installs:** keep this pack as reference documentation only. Do **not** copy or arm the coordination scripts.
+
+---
+
+## Script tiers (what to copy)
+
+| Tier | Scripts | Who |
+|------|---------|-----|
+| **Required (dual)** | `coord-monitor.sh` · `coord-send.sh` · `coord-status.sh` · `heartbeat.sh` · `bootstrap-identity.sh` · `coordination-precommit-hook.sh` | Every dual workspace root |
+| **Optional (PROTOCOL 1.1.0)** | `coord-protocol-metrics.sh` · `coord-session-healthcheck.sh` · `coord-evidence-lint.sh` · `coord-gate-audit.sh` (+ `PROTOCOL-AMENDMENTS.tsv`) | Dual sites adopting the robustness amendment |
+| **Do not copy** | Anything under `retired/` | Tombstones only — **no executables**. History in git. |
+
+Implementer sub-repos invoke the **parent workspace** copies by absolute path — they do not need a second full suite.
+
+---
+
+## Arming the inbox (harness bridge)
+
+`coord-monitor.sh` is a long-lived process that prints to stdout when addressed mail arrives. The agent only wakes if the **harness** bridges that stdout into the chat. Arm it with the matching tool for your host:
+
+| Host | How |
+|------|-----|
+| **Claude Code** | `Monitor` tool with `persistent:true` on the `coord-monitor.sh` command |
+| **Cursor Agent** | `Shell` with `notify_on_output` (pattern matching monitor output) — keep the process in the background |
+
+Arm **once per session** (persistent monitor). Do **not** re-arm after every message. On `heartbeat` `exit 42` (WATCHER-DOWN): re-arm the monitor **first**, then the heartbeat.
+
+```bash
+./coord-monitor.sh --identity <id> --dir <coord-dir>
+# optional on network-mounted coord-dirs:
+./coord-monitor.sh --identity <id> --dir <coord-dir> --force-poll
+```
+
 ---
 
 ## Topology — STAR
@@ -74,8 +107,8 @@ Run these steps in order when standing up a new dual session.
 [ ] 2. Create <coord-dir>/ if absent.
 [ ] 3. Write orchestrator.md from ROSTER-template (role=Orchestrator, state=Active).
 [ ] 4. M4: read it back — confirm it landed (sandbox filesystem can silently swallow writes).
-[ ] 5. Arm coord-monitor.sh via your harness's output→chat bridge (Claude Code: Monitor tool
-         persistent:true · Cursor: Shell + notify_on_output — see workspace CLAUDE.md "Arming the inbox"):
+[ ] 5. Arm coord-monitor.sh via your harness's output→chat bridge
+         (see § Arming the inbox above):
          ./coord-monitor.sh --identity orchestrator --dir <coord-dir>
 [ ] 6. Start heartbeat.sh in background:
          ./heartbeat.sh --identity orchestrator --role orchestrator --dir <coord-dir>
@@ -99,8 +132,8 @@ Run these steps in order when standing up a new dual session.
          (If no identity pre-known, the Identity Bootstrap section provides the naming handshake.)
 [ ] 3. Write <coord-dir>/impl-<name>.md from ROSTER-template (role=Implementer, zone=<cwd>, state=Active).
 [ ] 4. M4: read it back — confirm it landed.
-[ ] 5. Arm coord-monitor.sh via your harness's output→chat bridge (Claude Code: Monitor tool
-         persistent:true · Cursor: Shell + notify_on_output — see workspace CLAUDE.md "Arming the inbox"):
+[ ] 5. Arm coord-monitor.sh via your harness's output→chat bridge
+         (see § Arming the inbox above):
          ./coord-monitor.sh --identity impl-<name> --dir <coord-dir>
 [ ] 6. Start heartbeat.sh in background:
          ./heartbeat.sh --identity impl-<name> --role implementer --dir <coord-dir>
@@ -183,8 +216,7 @@ collision-free by construction.
    requesting name assignment. The new file trips the Orchestrator's watcher.
 
 2. **Arm** the monitor under the provisional identity, via your harness's output→chat
-   bridge (Claude Code: `Monitor` tool `persistent:true`; Cursor: Shell + `notify_on_output`
-   — see workspace CLAUDE.md "Arming the inbox"):
+   bridge (see § Arming the inbox above):
    ```bash
    ./coord-monitor.sh --identity "$PROV_ID" --dir <coord-dir>
    ```
@@ -398,7 +430,6 @@ Lossless-mandate WOs inherit this proving standard automatically (see WORK-ORDER
 | `ROSTER-template.md` | Presence file schema (M9 richer fields); registration and deregistration |
 | `QUEUE-template.md` | Claimable queue, three-bucket SSOT, depth-floor, push-assignment rules; in multi-project deployments, instantiate one queue per downstream repo (`queue-<repo>.md`) — see § Multi-project coordination |
 | `coordination-precommit-hook.sh` | PreToolUse hook for `git commit`/`push`/`rebase`: mailbox-read gate (Rule 4), dangerous-verb warning (`add -A`/`add .`/`commit -a`), non-blocking secret-scan; supports both the Claude Code JSON-stdin tool-input protocol and the Cursor `beforeShellExecution` allow/deny contract |
-| `retired/git-pre-commit.sh` | RETIRED — stale fork of the live hook under an old filename, superseded by `coordination-precommit-hook.sh`; kept for history only, see `retired/README.md` |
+| `retired/` | Tombstones only — retired watcher/hook **scripts were deleted** (git history retains bodies). See `retired/README.md`. Do not resurrect. |
 | `bootstrap-identity.sh` | DESIGN EXTENSION: provisional-ID generation (`--provision`) and identity adoption (`--adopt`) for the naming handshake; see § Identity Bootstrap |
-| `advanced/sqlite-mcp.README.md` | Optional advanced path: SQLite(WAL) + stdio-MCP for atomic claim (M6) |
-| `retired/watch-coordination.sh` | RETIRED — echo-and-terminate one-shot watcher, superseded by `coord-monitor.sh`; kept for history only, see `retired/README.md` |
+| `advanced/sqlite-mcp.README.md` | Optional advanced path: SQLite(WAL) + stdio-MCP for atomic claim (M6) — design sketch; align to persistent `coord-monitor.sh`, not the retired one-shot watcher |

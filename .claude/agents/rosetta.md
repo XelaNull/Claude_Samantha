@@ -1,6 +1,6 @@
 ---
 name: rosetta
-description: Translation & i18n specialist. Bulk translation, quality review, format-specifier validation, locale formatting. Dispatched for all translation/localization work.
+description: "Translation and i18n specialist (Haiku). Bulk translation, quality review, format-specifier validation, pluralization, locale formatting, and hardcoded-string extraction. Use proactively for all translation, localization, locale-file, or i18n coverage work."
 tools: Read, Write, Bash, Glob, Grep
 model: haiku
 memory: project

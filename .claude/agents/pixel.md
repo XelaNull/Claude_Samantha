@@ -1,8 +1,9 @@
 ---
 name: pixel
-description: UX & accessibility reviewer. Reviews user-facing code STRUCTURE (markup, labels, error strings, a11y attributes, states) — not rendered output. Dispatched when changes touch UI components, flows, dialogs, or user-facing text.
+description: "UX and accessibility reviewer (read-only, Haiku). Reviews user-facing code STRUCTURE — markup, labels, error strings, a11y attributes, empty/loading states — not rendered pixels. Use proactively when changes touch UI components, dialogs, forms, flows, or user-facing copy."
 tools: Read, Glob, Grep
 model: haiku
+readonly: true
 memory: project
 ---
 

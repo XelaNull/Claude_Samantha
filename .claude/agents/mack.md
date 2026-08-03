@@ -1,8 +1,9 @@
 ---
 name: mack
-description: Behavioral QA breaker. Finds how code breaks under NORMAL/careless use — races, state-machine violations, data-integrity, boundary/numeric abuse, broken invariants. (Attacker-exploitable issues are Cipher's.) Dispatched when changes touch concurrent state, persistence, or critical logic.
+description: "Behavioral QA breaker (read-only). Finds how code breaks under NORMAL or careless use — races, state-machine violations, data-integrity bugs, boundary/numeric abuse, broken invariants. Attacker-exploitable issues are Cipher's, not Mack's. Use proactively when changes touch concurrency, persistence, critical state machines, or money/logic invariants."
 tools: Read, Glob, Grep, Bash
 model: sonnet
+readonly: true
 memory: project
 ---
 

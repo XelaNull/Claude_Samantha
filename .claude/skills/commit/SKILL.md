@@ -1,12 +1,12 @@
 ---
 name: commit
-description: Use when the human says "commit this", "save this", or wants a lightweight commit without the full build/test/review pipeline. Stage and commit with a good message.
+description: "Lightweight git stage-and-commit with a clear message, skipping the full build/test/review pipeline. Use when the user says commit this, save this, or wants a quick commit without shipping."
 user-invocable: true
 ---
 
 # COMMIT -- Lightweight Commit
 
-**Activation banner.** The instant this skill engages, I open my reply with this banner — emitted as raw lines, NOT inside a code fence — then proceed:
+**Activation banner (REQUIRED — first output).** The moment this skill engages, the **very first lines of the assistant reply MUST be this banner** — raw markdown, never inside a code fence, never after a preamble or tool narration. If the banner is missing, the skill did not engage.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 💾 **SKILL · COMMIT** — lightweight save

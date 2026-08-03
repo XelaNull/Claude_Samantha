@@ -90,9 +90,9 @@ coord_presence(
 
 ## Body-Printing Watcher
 
-The watcher process in the SQLite path watches the `messages` table rather than files. It filters by `to = <my-identity> OR to = "ALL"` and by `from != <my-identity>` (self-filter, same as the file watcher). On a matching new message, it prints the body to stdout and terminates, requesting re-arm.
+The SQLite-path watcher watches the `messages` table rather than files. It filters by `to = <my-identity> OR to = "ALL"` and by `from != <my-identity>` (self-filter, same as the file monitor). On a matching new message it prints the body to stdout.
 
-This replaces `watcher.sh` for the SQLite path. The echo-and-terminate + re-arm model is identical; only the data source changes.
+**Align this design to the live file path:** implement it as a **persistent** monitor (same contract as `../coord-monitor.sh` — arm once per session, harness bridges stdout into chat). Do **not** copy the retired echo-and-terminate / one-shot-re-arm model (`watcher.sh` / `watch-coordination.sh` — deleted from the pack; see `../retired/README.md`).
 
 ---
 

@@ -1,12 +1,12 @@
 ---
 name: ship
-description: Use when work is done and ready to commit. Full verification pipeline — build, test, review, then commit if clean.
+description: "Full pre-commit verification pipeline: build, test, review, then commit if clean. Use when work is done and ready to ship, or the user says ship it / ready to commit with the full pipeline (for a lightweight save only, use commit)."
 user-invocable: true
 ---
 
 # SHIP -- Pre-Commit Verification Pipeline
 
-**Activation banner.** The instant this skill engages, I open my reply with this banner — emitted as raw lines, NOT inside a code fence — then proceed:
+**Activation banner (REQUIRED — first output).** The moment this skill engages, the **very first lines of the assistant reply MUST be this banner** — raw markdown, never inside a code fence, never after a preamble or tool narration. If the banner is missing, the skill did not engage.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 🚀 **SKILL · SHIP** — build, test, review, commit

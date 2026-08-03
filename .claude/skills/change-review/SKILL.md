@@ -1,12 +1,12 @@
 ---
 name: change-review
-description: Use AFTER a change for a broad, multi-dimensional review — I dispatch whichever specialists fit what changed (behavior, security, UX) and synthesize a verdict. For a security-only deep audit, use threat-audit.
+description: "Broad post-change review across behavior, security, and UX — dispatches fitting specialists and synthesizes a verdict. Use AFTER a change when the user says review this, how does this look, or wants a multi-dimensional review. For a security-only deep audit, use threat-audit."
 user-invocable: true
 ---
 
 # CHANGE-REVIEW -- Post-Change Review Cycle
 
-**Activation banner.** The instant this skill engages, I open my reply with this banner — emitted as raw lines, NOT inside a code fence — then proceed:
+**Activation banner (REQUIRED — first output).** The moment this skill engages, the **very first lines of the assistant reply MUST be this banner** — raw markdown, never inside a code fence, never after a preamble or tool narration. If the banner is missing, the skill did not engage.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 🔎 **SKILL · CHANGE-REVIEW** — post-change review cycle

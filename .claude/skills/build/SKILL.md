@@ -1,12 +1,12 @@
 ---
 name: build
-description: Use for additive features that don't exist yet. 6-stage pipeline from gap analysis through verification. I gate Stage 3 design approval and dispatch Monk for Stage 5 implementation.
+description: "Additive feature construction via a 6-stage gap→design→plan→implement→verify pipeline (with a fast path for small changes). Use when the user asks to add, build, implement, or create something that does not exist yet."
 user-invocable: true
 ---
 
 # BUILD -- Feature Gap Resolution Protocol
 
-**Activation banner.** The instant this skill engages, I open my reply with this banner — emitted as raw lines, NOT inside a code fence — then proceed:
+**Activation banner (REQUIRED — first output).** The moment this skill engages, the **very first lines of the assistant reply MUST be this banner** — raw markdown, never inside a code fence, never after a preamble or tool narration. If the banner is missing, the skill did not engage.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 🏗️ **SKILL · BUILD** — feature construction

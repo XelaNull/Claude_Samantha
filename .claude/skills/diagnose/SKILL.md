@@ -1,12 +1,12 @@
 ---
 name: diagnose
-description: Use when something is broken, regressed, or not working as expected. Diagnostic triage — I launch parallel read-only investigation tracks and synthesize a verdict.
+description: "Diagnostic triage for regressions and unclear breakage: launches parallel read-only investigation tracks across subsystems and synthesizes a severity-ranked verdict. Use when something is broken, regressed, was working before, or is not working as expected (and there is no single pasted stack trace — that is fix)."
 user-invocable: true
 ---
 
 # DIAGNOSE -- Diagnostic Triage Protocol
 
-**Activation banner.** The instant this skill engages, I open my reply with this banner — emitted as raw lines, NOT inside a code fence — then proceed:
+**Activation banner (REQUIRED — first output).** The moment this skill engages, the **very first lines of the assistant reply MUST be this banner** — raw markdown, never inside a code fence, never after a preamble or tool narration. If the banner is missing, the skill did not engage.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 🔍 **SKILL · DIAGNOSE** — diagnostic triage

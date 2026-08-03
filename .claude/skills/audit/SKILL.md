@@ -1,12 +1,12 @@
 ---
 name: audit
-description: "Use when the human wants a full codebase-vs-docs/spec audit — discover every gap (missing features, half-built features, code/doc divergence, dead code, doc gaps) and turn them into a prioritized backlog + work orders to bring the code up to spec. The orchestrator's queue-feeding sweep. For audit-AND-fix-now in one session, use spec-check."
+description: "Full codebase-vs-docs/spec discovery audit: finds missing features, half-built work, code/doc divergence, dead code, and doc gaps, then emits a prioritized backlog and work orders. Use when the user wants a queue-feeding sweep, 'what's missing vs the spec', or 'bring code up to spec'. For audit-and-fix-now in one session, use spec-check instead."
 user-invocable: true
 ---
 
 # AUDIT -- Code↔Doc Discovery → Backlog
 
-**Activation banner.** The instant this skill engages, I open my reply with this banner — emitted as raw lines, NOT inside a code fence — then proceed:
+**Activation banner (REQUIRED — first output).** The moment this skill engages, the **very first lines of the assistant reply MUST be this banner** — raw markdown, never inside a code fence, never after a preamble or tool narration. If the banner is missing, the skill did not engage.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 🔭 **SKILL · AUDIT** — code↔doc discovery → backlog

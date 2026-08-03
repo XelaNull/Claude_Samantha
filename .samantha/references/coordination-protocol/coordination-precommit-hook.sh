@@ -212,7 +212,7 @@ FAIL=0
 #
 # Per-instance offset file tracks how far into orchestrator.md this agent has
 # acknowledged. File: <coord-dir>/.watch-state/<id>/orchestrator.md.size
-# (byte offset, plain text). This is the SAME file that watch-coordination.sh
+# (byte offset, plain text). This is the SAME file that coord-monitor.sh
 # persists its read-time EOF to on every wake — auto-maintained by the watcher
 # with no manual wc -c step and no drift between watcher state and hook state.
 # Bytes after the stored offset are "unread". We block if any contain a message

@@ -10,12 +10,13 @@
 name: skill-name
 
 # description:
-#   AUTO-INVOKE TRIGGER. Claude Code reads this to decide whether to invoke this
-#   skill automatically when the human's intent matches. Write it as a concise
-#   statement of when to use this skill — not what it does mechanically.
-#   Example: "Use when the human reports a bug or regression that previously worked."
+#   AUTO-INVOKE TRIGGER. Both Claude Code and Cursor read this to decide whether
+#   to invoke the skill. Write third-person WHAT + WHEN with concrete trigger
+#   phrases (not first-person "I…"). Example:
+#   "Diagnostic triage for regressions. Use when something is broken, regressed,
+#    or was working before."
 #
-description: "Use when [describe the situation / intent that triggers this skill]."
+description: "Does X. Use when the user asks about Y / says Z."
 
 # argument-hint:
 #   Shown to the user when the skill is invoked with /name. Describes what
@@ -92,7 +93,7 @@ user-invocable: true
 
 # <Skill Name> — <one-line purpose>
 
-**Activation banner.** The instant this skill engages, I open my reply with this banner — emitted as raw lines, NOT inside a code fence — then proceed:
+**Activation banner (REQUIRED — first output).** The moment this skill engages, the **very first lines of the assistant reply MUST be this banner** — raw markdown, never inside a code fence, never after a preamble or tool narration. If the banner is missing, the skill did not engage.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 <emoji> **SKILL · <NAME>** — <one-line purpose>

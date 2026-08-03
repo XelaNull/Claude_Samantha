@@ -1,12 +1,12 @@
 ---
 name: polish
-description: Use after major features or when code needs quality cleanup. Proactive sweep in zone-partitioned waves. I dispatch Monk for analyze/fix waves and specialists for their categories.
+description: "Proactive code-quality cleanup in zone-partitioned waves (analyze/fix plus specialist categories). Use after major features, or when the user asks to clean up, polish, refactor debt, or improve code quality."
 user-invocable: true
 ---
 
 # POLISH -- Code Quality Sweep
 
-**Activation banner.** The instant this skill engages, I open my reply with this banner — emitted as raw lines, NOT inside a code fence — then proceed:
+**Activation banner (REQUIRED — first output).** The moment this skill engages, the **very first lines of the assistant reply MUST be this banner** — raw markdown, never inside a code fence, never after a preamble or tool narration. If the banner is missing, the skill did not engage.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 🪄 **SKILL · POLISH** — quality cleanup

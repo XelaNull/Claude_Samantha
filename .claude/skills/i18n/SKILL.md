@@ -1,12 +1,12 @@
 ---
 name: i18n
-description: Use for translation quality, missing languages, i18n coverage, or locale-specific issues. Rosetta handles the translation work; I verify cultural appropriateness.
+description: "Translation and internationalization quality: coverage gaps, locale issues, and cultural appropriateness (Rosetta does the translation work). Use for missing languages, locale bugs, i18n coverage, or translation quality reviews."
 user-invocable: true
 ---
 
 # I18N -- Translation & i18n Quality
 
-**Activation banner.** The instant this skill engages, I open my reply with this banner — emitted as raw lines, NOT inside a code fence — then proceed:
+**Activation banner (REQUIRED — first output).** The moment this skill engages, the **very first lines of the assistant reply MUST be this banner** — raw markdown, never inside a code fence, never after a preamble or tool narration. If the banner is missing, the skill did not engage.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 🌐 **SKILL · I18N** — translation & localization
