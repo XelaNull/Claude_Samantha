@@ -30,27 +30,107 @@
 # effective latency as low seconds, not milliseconds.
 #
 # Usage (under the Monitor tool, persistent:true):
-#   coord-monitor.sh --identity orchestrator --dir <coorddir> [--poll 2] [--safety-poll 10] [--force-poll]
+#   coord-monitor.sh --identity orchestrator --role orchestrator --dir <coorddir> [--poll 2] [--safety-poll 10] [--force-poll]
+#   coord-monitor.sh --identity impl-<name> --role implementer --dir <coorddir> ...
 #
-# Watches every *.md in <dir> EXCEPT the own-identity file, QUEUE.md, and
-# *.archive.md — i.e. the peer outbox(es), matching the STAR no-self-watch rule.
+# STAR watch set (structural, not conditional — PROCESS-NOTE 2026-07-28):
+#   orchestrator  → every *.md except own outbox, QUEUE.md, PROJECTS.md, queue-*.md, *.archive.md
+#   implementer   → ONLY orchestrator.md (no spoke-to-spoke, no self)
+# --role is explicit; if omitted, identity `orchestrator` ⇒ hub, anything else ⇒ spoke
+# (prefix inference is a fallback only — prefer --role so non-impl-* spoke names still work).
+# EXCEPTION (2026-07-18): own-file HEARTBEAT/IDLE-KICK via emit_own_idle_kick — the only
+# self-wake path when peers are quiet (pre-fix: implementer heartbeats never reached
+# their own agent).
+#
+# REMOTE CHANNEL (REMOTE-SEATS.md §3.4, 2026-07-18 ratified — hub-only, a SECOND,
+# separate coord-monitor.sh process, never combined with the local channel above):
+#   coord-monitor.sh --identity orchestrator --dir <coorddir> --remote-host <alias> \
+#     [--remote-bus-dir <path>] [--poll 2]
+# Watches remote seats' outboxes under $REMOTE_BUS_DIR/*.md (excluding the hub's own
+# mirrored orchestrator.md, same STAR no-self-watch exclusion as the local channel)
+# PLUS a lighter presence-staleness sweep over $REMOTE_BUS_DIR/.presence/*. fswatch
+# does not apply here at all (no local fs-events for a remote host) — always polls,
+# clamped to >=2s per spec. Same size-offset delta math as the local channel, but
+# batched into ONE ssh exec per sweep for the common (nothing changed) case: a single
+# remote one-liner reports every watched file's current size, and only files that
+# actually grew get a SECOND, per-file ssh call to fetch their new tail bytes — this
+# keeps a quiet remote bus cheap regardless of how many seats it has. Writes its
+# watcher pidfile to watcher-remote.pid (not watcher.pid) so local + remote channels
+# never collide; heartbeat.sh's dead-man switch enumerates BOTH (see its own header).
+# Does NOT run emit_own_idle_kick (no "own file" content lives in the remote bus
+# watch-set — the hub's own outbox is local) and does NOT run check_heartbeat (the
+# LOCAL channel already does that mutual-monitor; running it twice would just double
+# every HEARTBEAT-DOWN alert into chat).
 
 set -u
+# F+ (AMEND-PROCESS-HYGIENE-20260726): --help must NEVER claim a seat pidfile.
+# Previously `*) shift;;` swallowed --help and fell through to the default
+# identity=orchestrator pidfile write — Cursor hung --help stole hub watcher.pid.
+for _a in "$@"; do
+  case "$_a" in
+    -h|--help)
+      printf 'Usage: coord-monitor.sh --identity <id> [--role orchestrator|implementer] --dir <coorddir> [--poll N] [--safety-poll N] [--force-poll]\n'
+      printf '       coord-monitor.sh --identity <id> --dir <coorddir> --remote-host <alias> --remote-bus-dir <path> [--poll N]\n'
+      printf 'STAR: hub watches all peer outboxes; spoke watches ONLY orchestrator.md.\n'
+      printf 'Persistent STAR inbox monitor. Exits 0 on help WITHOUT writing any pidfile.\n'
+      exit 0
+      ;;
+  esac
+done
 IDENT="orchestrator"
+ROLE=""           # orchestrator | implementer — empty ⇒ infer from IDENT
 DIR="${COORD_DIR:-$PWD/.samantha/coord}"
 POLL=2            # fallback poll interval (used only when fswatch is unavailable, or --force-poll)
 SAFETY_POLL=10    # event-mode slow-poll backstop + heartbeat-check cadence
 FORCE_POLL=0      # skip fswatch entirely and run poll_loop — for network-mounted coord-dirs
+REMOTE_HOST=""    # §3.4 remote channel — set = this invocation watches $REMOTE_BUS_DIR over ssh instead
+REMOTE_BUS_DIR=""   # optional remote channel — REQUIRED with --remote-host (see advanced/REMOTE-SEATS.md)
 while [ $# -gt 0 ]; do
   case "$1" in
     --identity) IDENT="$2"; shift 2;;
+    --role) ROLE="$2"; shift 2;;
     --dir) DIR="$2"; shift 2;;
     --poll) POLL="$2"; shift 2;;
     --safety-poll) SAFETY_POLL="$2"; shift 2;;
     --force-poll) FORCE_POLL=1; shift;;
+    --remote-host) REMOTE_HOST="$2"; shift 2;;
+    --remote-bus-dir) REMOTE_BUS_DIR="$2"; shift 2;;
+    -h|--help) exit 0;;  # already handled above; keep for completeness
     *) shift;;
   esac
 done
+
+# Resolve STAR role (explicit --role wins; else identity-based fallback).
+if [ -z "$ROLE" ]; then
+  if [ "$IDENT" = "orchestrator" ]; then
+    ROLE="orchestrator"
+  else
+    ROLE="implementer"
+  fi
+fi
+case "$ROLE" in
+  orchestrator|implementer) ;;
+  *)
+    printf '┃ coord-monitor: invalid --role %s (want orchestrator|implementer)\n' "$ROLE" >&2
+    exit 2
+    ;;
+esac
+
+# §3.4: remote channel polls only — no fs-events exist for a different machine.
+# poll >= 2s per spec; clamp rather than silently accept a tighter interval that
+# would just hammer ssh for no benefit (there is no event-driven path to fall back
+# FROM here — --force-poll's whole point doesn't apply, this mode has no fswatch
+# branch to skip in the first place).
+# Portable rule: remote channel requires an explicit bus dir (no baked project path).
+if [ -n "$REMOTE_HOST" ] && [ -z "$REMOTE_BUS_DIR" ]; then
+  echo "ERROR: --remote-host requires --remote-bus-dir <path> (see advanced/REMOTE-SEATS.md)." >&2
+  exit 2
+fi
+
+if [ -n "$REMOTE_HOST" ] && [ "$POLL" -lt 2 ] 2>/dev/null; then
+  printf '┃ coord-monitor: --poll %s below the §3.4 remote-channel floor — clamping to 2s\n' "$POLL"
+  POLL=2
+fi
 
 STATEDIR="$DIR/.watch-state/$IDENT/monitor"
 mkdir -p "$STATEDIR"
@@ -60,17 +140,138 @@ mkdir -p "$STATEDIR"
 # backstop watch THIS monitor — if it ever dies, the heartbeat fires exit-42 and
 # the agent relaunches. Same safety net, zero new machinery. (Stop the old
 # one-shot watcher BEFORE launching this, or they fight over the file.)
-WATCHER_PID_FILE="$DIR/.watch-state/$IDENT/watcher.pid"
+# §3.4: the remote channel claims a SEPARATE pidfile (watcher-remote.pid) so it
+# never collides with a simultaneously-running LOCAL channel for the same identity
+# — the hub runs both channels as two independent coord-monitor.sh processes.
+if [ -n "$REMOTE_HOST" ]; then
+  WATCHER_PID_FILE="$DIR/.watch-state/$IDENT/watcher-remote.pid"
+else
+  WATCHER_PID_FILE="$DIR/.watch-state/$IDENT/watcher.pid"
+fi
 printf '%s' "$$" > "$WATCHER_PID_FILE"
 
-# Peer files = *.md minus own outbox, the queue board, and archives.
+# ── §3.4 remote channel: a fully separate code path that exits below, before
+#    reaching any local-mode function/variable (watched/emit_new/sweep/fswatch/
+#    etc.) — the local-mode code from here to the bottom of the file is verbatim
+#    unreached, and unmodified, when --remote-host is absent. ──
+if [ -n "$REMOTE_HOST" ]; then
+  remote_offset_file() { printf '%s/remote.%s.off' "$STATEDIR" "$1"; }
+
+  # ONE ssh exec per sweep for the common case: "MSG <name> <size>" for every
+  # watched bus/*.md (excluding the hub's own mirrored outbox, same STAR
+  # no-self-watch exclusion as the local watched()) plus "PRES <name> <mtime>"
+  # for every .presence/* file. Embedded single-quoted, same reasoning as
+  # coord-send.sh's mirror ship command (see its header): the script is 100%
+  # program-constructed from our own vars, grep-verified to contain zero
+  # embedded single quotes, and this ALSO avoids any pipe/stdin trickery since
+  # there's no payload competing for stdin here at all (read-only listing).
+  remote_sweep_script() {
+    cat <<REMOTESCRIPT
+cd "$REMOTE_BUS_DIR" 2>/dev/null || exit 0
+for f in *.md; do
+  [ -e "\$f" ] || continue
+  [ "\$f" = "$IDENT.md" ] && continue
+  [ "\$f" = "QUEUE.md" ] && continue
+  [ "\$f" = "PROJECTS.md" ] && continue
+  case "\$f" in queue-*.md) continue;; esac
+  printf "MSG %s %s\n" "\$f" "\$(wc -c < "\$f" | tr -d " ")"
+done
+[ -d .presence ] && for f in .presence/*; do
+  [ -e "\$f" ] || continue
+  printf "PRES %s %s\n" "\$(basename "\$f")" "\$(stat -c %Y "\$f" 2>/dev/null || echo 0)"
+done
+REMOTESCRIPT
+  }
+
+  remote_sweep_sizes() {
+    local script; script=$(remote_sweep_script)
+    case "$script" in *"'"*)
+      printf '┃ COORD ⚠️ INTERNAL BUG — remote sweep script contains a single quote, refusing to run it\n' >&2
+      return 1
+      ;;
+    esac
+    ssh -o BatchMode=yes -o ConnectTimeout=10 "$REMOTE_HOST" "bash -c '$script'" 2>/dev/null
+  }
+
+  remote_emit_new() {
+    local name="$1" cur="$2" of prev
+    of=$(remote_offset_file "$name"); prev=$(cat "$of" 2>/dev/null || echo 0)
+    [ -z "${cur:-}" ] && return 0
+    if [ "$cur" -lt "$prev" ]; then
+      printf '┃ COORD ⟳ %s (remote) rewritten/archived (%s→%s bytes) — baseline reset @ %s\n' \
+        "$name" "$prev" "$cur" "$(date -u +%FT%TZ)"
+      printf '%s' "$cur" > "$of"; return 0
+    fi
+    if [ "$cur" -gt "$prev" ]; then
+      printf '┃ COORD ▼ new message on %s (remote) · %s bytes @ %s\n' "$name" "$((cur - prev))" "$(date -u +%FT%TZ)"
+      ssh -o BatchMode=yes -o ConnectTimeout=10 "$REMOTE_HOST" "tail -c +$((prev + 1)) '$REMOTE_BUS_DIR/$name'" 2>/dev/null
+      printf '┃ COORD ▲ end %s (remote) — re-run coord-status.sh if you acted on a DEPLOY/DECISION\n' "$name"
+      printf '%s' "$cur" > "$of"
+    fi
+    return 0
+  }
+
+  # Presence staleness (§5, soft threshold 20min — a mid-WO ping-then-reclaim
+  # threshold of 2h is a hub-decision escalation, not this monitor's job; this
+  # only surfaces the signal once per stale-transition, never every tick).
+  PRESENCE_STALE_SOFT=1200
+  remote_presence_check() {
+    local name="$1" mtime="$2" of now age wasstale
+    [ -z "${mtime:-}" ] && return 0
+    of="$STATEDIR/remote.presence.$name.state"
+    now=$(date +%s); age=$((now - mtime))
+    wasstale=$(cat "$of" 2>/dev/null || echo 0)
+    if [ "$age" -ge "$PRESENCE_STALE_SOFT" ]; then
+      if [ "$wasstale" != "1" ]; then
+        printf '┃ COORD ⚠️ SEAT STALE — %s presence not touched in %ss (soft threshold %ss) @ %s\n' \
+          "$name" "$age" "$PRESENCE_STALE_SOFT" "$(date -u +%FT%TZ)"
+        printf '1' > "$of"
+      fi
+    else
+      [ "$wasstale" = "1" ] && printf '┃ COORD ✅ %s presence RECOVERED @ %s\n' "$name" "$(date -u +%FT%TZ)"
+      printf '0' > "$of"
+    fi
+    return 0
+  }
+
+  sweep_remote() {
+    local kind name val
+    while IFS=' ' read -r kind name val; do
+      [ -z "$kind" ] && continue
+      case "$kind" in
+        MSG)  remote_emit_new "$name" "$val" ;;
+        PRES) remote_presence_check "$name" "$val" ;;
+      esac
+    done < <(remote_sweep_sizes)
+  }
+
+  # Initialize offsets to CURRENT end so arm streams only NEW messages, never replays history.
+  while IFS=' ' read -r kind name val; do
+    [ "$kind" = "MSG" ] && printf '%s' "$val" > "$(remote_offset_file "$name")"
+  done < <(remote_sweep_sizes)
+
+  printf '┃ coord-monitor ARMED for %s (REMOTE channel, §3.4) @ %s — host: %s · bus: %s · poll: %ss\n' \
+    "$IDENT" "$(date -u +%FT%TZ)" "$REMOTE_HOST" "$REMOTE_BUS_DIR" "$POLL"
+
+  while true; do sweep_remote; sleep "$POLL"; done
+  exit 0
+fi
+
+# Peer files — STAR structural (not conditional):
+#   hub (orchestrator)  → all *.md except own / QUEUE / PROJECTS / queue-* / archives
+#   spoke (implementer) → ONLY orchestrator.md
 watched() {
   local f b
+  if [ "$ROLE" = "implementer" ]; then
+    f="$DIR/orchestrator.md"
+    [ -e "$f" ] && printf '%s\n' "$f"
+    return 0
+  fi
   for f in "$DIR"/*.md; do
     [ -e "$f" ] || continue
     b=$(basename "$f")
     case "$b" in
-      "$IDENT.md"|QUEUE.md|*.archive.md) continue;;
+      "$IDENT.md"|QUEUE.md|PROJECTS.md|queue-*.md|*.archive.md) continue;;
     esac
     printf '%s\n' "$f"
   done
@@ -104,12 +305,44 @@ emit_new() {
   return 0
 }
 
+# Self-nudge: own outbox is NOT in watched() (STAR no-self-watch for peer chatter).
+# But 💓 HEARTBEAT / ⚡ IDLE-KICK / ⚠️ WATCHER-DOWN on the own file MUST wake this seat —
+# otherwise an idle implementer never learns it is idle (Max has to poke by hand).
+# STATUS/ACK we write ourselves advance the offset silently (no emit → no self-loop).
+emit_own_idle_kick() {
+  local f="$DIR/$IDENT.md" of cur prev chunk
+  [ -f "$f" ] || return 0
+  of=$(offset_file "$f"); cur=$(size_of "$f"); prev=$(cat "$of" 2>/dev/null || echo 0)
+  [ -z "${cur:-}" ] && return 0
+  if [ "$cur" -lt "$prev" ]; then
+    printf '%s' "$cur" > "$of"; return 0
+  fi
+  if [ "$cur" -gt "$prev" ]; then
+    chunk=$(tail -c "+$((prev+1))" "$f")
+    printf '%s' "$cur" > "$of"
+    # Always advance offset — including for our own STATUS writes.
+    if printf '%s' "$chunk" | grep -qE '^### .*(💓 HEARTBEAT|⚠️ WATCHER-DOWN)|^⚡ \*\*IDLE-KICK\*\*'; then
+      printf '┃ IDLE-KICK ▼ own-file nudge on %s · %s bytes @ %s\n' \
+        "$(basename "$f")" "$((cur-prev))" "$(date -u +%FT%TZ)"
+      printf '%s' "$chunk"
+      printf '\n┃ IDLE-KICK ▲ end — mid-task CONTINUE; else start idle_policy work NOW (do not stand by)\n'
+    fi
+  fi
+  return 0
+}
+
 # Initialize offsets to the CURRENT end so we stream only NEW messages, never replay history.
 for f in $(watched); do printf '%s' "$(size_of "$f")" > "$(offset_file "$f")"; done
+# Own file: baseline at EOF too (first HEARTBEAT after arm is the first kick).
+OWN_FILE="$DIR/$IDENT.md"
+[ -f "$OWN_FILE" ] && printf '%s' "$(size_of "$OWN_FILE")" > "$(offset_file "$OWN_FILE")"
 
-# sweep: emit any new content across all peer files (idempotent; a no-op when nothing changed,
-# and re-globs each pass so a newly-appearing Implementer file is auto-discovered).
-sweep() { local f; for f in $(watched); do emit_new "$f"; done; }
+# sweep: peer deltas + own-file idle-kick filter.
+sweep() {
+  local f
+  for f in $(watched); do emit_new "$f"; done
+  emit_own_idle_kick
+}
 
 # MUTUAL MONITORING. The heartbeat watches THIS monitor (via watcher.pid) and exit-42s if
 # it dies; this monitor watches the heartbeat (via heartbeat.pid) and ALERTS in-chat if IT
@@ -118,15 +351,26 @@ sweep() { local f; for f in $(watched); do emit_new "$f"; done; }
 # per down-transition, with a ~3-tick tolerance so a heartbeat relaunch doesn't false-alarm.
 HB_PID_FILE="$DIR/.watch-state/$IDENT/heartbeat.pid"
 hb_dead=0; hb_alerted=0
+# D: bridged liveness — process must exist AND ppid≠1 (unless COORD_ALLOW_PPID1).
+heartbeat_bridged_alive() {
+  local hp pp
+  hp=$(cat "$HB_PID_FILE" 2>/dev/null)
+  [ -n "$hp" ] && ps -p "$hp" >/dev/null 2>&1 || return 1
+  pp=$(ps -p "$hp" -o ppid= 2>/dev/null | tr -d ' ')
+  if [ -z "${COORD_ALLOW_PPID1:-}" ] && [ "$pp" = "1" ]; then
+    return 1
+  fi
+  return 0
+}
 check_heartbeat() {
   local hp; hp=$(cat "$HB_PID_FILE" 2>/dev/null)
-  if [ -n "$hp" ] && ps -p "$hp" >/dev/null 2>&1; then
+  if heartbeat_bridged_alive; then
     [ "$hb_alerted" = 1 ] && printf '┃ COORD ✅ heartbeat RECOVERED (pid %s) @ %s\n' "$hp" "$(date -u +%FT%TZ)"
     hb_dead=0; hb_alerted=0
   else
     hb_dead=$((hb_dead+1))
     if [ "$hb_dead" -ge 3 ] && [ "$hb_alerted" = 0 ]; then
-      printf '┃ COORD ⚠️ HEARTBEAT DOWN @ %s (mutual-monitor) — the liveness backstop is gone; relaunch heartbeat.sh --identity %s (Bash run_in_background + dangerouslyDisableSandbox), then coord-status.sh to confirm BOTH ALIVE\n' "$(date -u +%FT%TZ)" "$IDENT"
+      printf '┃ COORD ⚠️ HEARTBEAT DOWN @ %s (mutual-monitor) — the liveness backstop is gone (missing or ORPHAN ppid=1); relaunch heartbeat.sh --identity %s (Bash run_in_background + notify_on_output / dangerouslyDisableSandbox), then coord-status.sh to confirm BOTH ALIVE\n' "$(date -u +%FT%TZ)" "$IDENT"
       hb_alerted=1
     fi
   fi
@@ -178,8 +422,8 @@ elif command -v fswatch >/dev/null 2>&1; then
 else
   MODE="poll ${POLL}s (fswatch not on PATH — install it for event-driven receive)"
 fi
-printf '┃ coord-monitor ARMED for %s @ %s — watching: %s · MODE: %s · mutual-monitoring the heartbeat\n' \
-  "$IDENT" "$(date -u +%FT%TZ)" "$(watched | xargs -n1 basename 2>/dev/null | tr '\n' ' ')" "$MODE"
+printf '┃ coord-monitor ARMED for %s (role=%s) @ %s — watching: %s · MODE: %s · mutual-monitoring the heartbeat\n' \
+  "$IDENT" "$ROLE" "$(date -u +%FT%TZ)" "$(watched | xargs -n1 basename 2>/dev/null | tr '\n' ' ')" "$MODE"
 
 if [ "$FORCE_POLL" != 1 ] && command -v fswatch >/dev/null 2>&1; then
   fswatch_loop

@@ -1,8 +1,15 @@
 # Coordination Protocol — Orchestrator–Implementer
 
-PROTOCOL-VERSION: 1.1.0
+PROTOCOL-VERSION: 1.2.0
 
 > **Versioning:** bump `PROTOCOL-VERSION` on every ratified amendment.
+>
+> **1.2.0** (2026-08-03) — Backport of live dual-suite extensions into the portable pack:
+> IDLE-KICK (own-file self-nudge; distinct from orchestrator discover-on-idle) · `--idle-policy` ·
+> HOLD-DAMP-V2 · `--weak-seat` · `--role` + STAR excludes for `PROJECTS.md` / `queue-*.md` ·
+> optional remote ssh bus (`advanced/REMOTE-SEATS.md`; `--remote-host` requires `--remote-bus-dir`;
+> no baked host/bus paths). Live deployment overlays (e.g. Nebuspace `.claude/`) may still carry
+> site defaults — do not blind-overwrite them from this pack without a per-file newer check.
 
 The file-based protocol for **dual-mode** operation: Samantha (Orchestrator) coordinating one or more Monk peer instances (Implementers) through shared files when two Claude Code processes must work in parallel.
 
@@ -28,6 +35,7 @@ Otherwise: **stay in solo mode** (background subagents via `run_in_background`).
 |------|---------|-----|
 | **Required (dual)** | `coord-monitor.sh` · `coord-send.sh` · `coord-status.sh` · `heartbeat.sh` · `bootstrap-identity.sh` · `coordination-precommit-hook.sh` | Every dual workspace root |
 | **Optional (PROTOCOL 1.1.0)** | `coord-protocol-metrics.sh` · `coord-session-healthcheck.sh` · `coord-evidence-lint.sh` · `coord-gate-audit.sh` (+ `PROTOCOL-AMENDMENTS.tsv`) | Dual sites adopting the robustness amendment |
+| **Optional (PROTOCOL 1.2.0)** | Remote ssh bus — same `coord-monitor`/`heartbeat` binaries with `--remote-host` + `--remote-bus-dir`; see `advanced/REMOTE-SEATS.md` | Dual sites with off-box Implementers |
 | **Do not copy** | Anything under `retired/` | Tombstones only — **no executables**. History in git. |
 
 Implementer sub-repos invoke the **parent workspace** copies by absolute path — they do not need a second full suite.
@@ -50,6 +58,14 @@ Arm **once per session** (persistent monitor). Do **not** re-arm after every mes
 # optional on network-mounted coord-dirs:
 ./coord-monitor.sh --identity <id> --dir <coord-dir> --force-poll
 ```
+
+### IDLE-KICK + HOLD (PROTOCOL 1.2.0)
+
+STAR spokes do not watch their own outbox — a bare heartbeat would never wake the **owning** seat. `heartbeat.sh` appends an actionable `⚡ IDLE-KICK` (standing `--idle-policy`); `coord-monitor.sh` self-nudges on own-file HEARTBEAT/IDLE-KICK/WATCHER-DOWN.
+
+- **IDLE-KICK** ≠ discover-on-idle. IDLE-KICK = self-wake + policy (all seats). Discover-on-idle = Orchestrator queue-depth directive **folded into** the IDLE-KICK body when `role=orchestrator`.
+- **HOLD-DAMP-V2:** named `[HOLD:…]` damps IDLE-KICK and requires periodic HOLD-CHECK ACKs (observed-incident amendment, 2026-07-29).
+- **`--weak-seat`:** requires explicit `--idle-policy` (no strong-seat audit-and-improve default). See `advanced/REMOTE-SEATS.md`.
 
 ---
 
@@ -415,10 +431,10 @@ Lossless-mandate WOs inherit this proving standard automatically (see WORK-ORDER
 
 | File | Purpose |
 |------|---------|
-| `coord-monitor.sh` | Persistent coordination monitor (STAR topology) — runs forever under the harness's output→chat bridge, no re-arm between messages; event-driven via `fswatch` with a poll-loop fallback; `--force-poll` skips fswatch for network-mounted coord-dirs (see § Network Filesystems); named args `--identity`/`--dir`/`--poll`/`--safety-poll`/`--force-poll`; delta = size-offset newly-appended bytes |
+| `coord-monitor.sh` | Persistent STAR monitor — local + optional remote ssh channel (`--remote-host` **requires** `--remote-bus-dir`); `--role`; excludes `QUEUE.md` / `PROJECTS.md` / `queue-*.md` / archives; own-file IDLE-KICK nudge (`emit_own_idle_kick`); `--force-poll` for network mounts; portable `DIR=${COORD_DIR:-$PWD/.samantha/coord}` |
 | `coord-send.sh` | The publish half of the coordination chat-room — auto-fills timestamp/identity/header, appends atomically to your own outbox, reads the append back to verify it landed; named args `--to`/`--tag`/`--subject`/`--body`/`--body-file` |
-| `coord-status.sh` | Read-only liveness check — verifies the watcher (`coord-monitor.sh`) and heartbeat are BOTH alive; run after any re-arm before asserting it worked |
-| `heartbeat.sh` | Idle-poke + Orchestrator discover-on-idle trigger + watcher dead-man switch (v2.1: verifies watcher.pid liveness each cadence tick, 60s arm-grace, PID-reuse guard accepting either `coord-monitor.sh` or the retired `watch-coordination.sh`; on 3 consecutive dead ticks posts `⚠️ WATCHER-DOWN` and self-terminates `exit 42`, never auto-re-arms — see § Re-arm Rules); named args; 20min idle threshold, 300s cadence |
+| `coord-status.sh` | Read-only liveness — local (+ remote) watcher pidfiles and heartbeat; ALL-CHANNELS aware; portable coord-dir default |
+| `heartbeat.sh` | IDLE-KICK (`--idle-policy`) + Orchestrator discover-on-idle (folded into IDLE-KICK body) + HOLD-DAMP-V2 + `--weak-seat` + ALL-CHANNELS watcher dead-man (`exit 42`); portable `--dir` |
 | `coord-protocol-metrics.sh` | Shared helpers sourced by `coord-status.sh` / `heartbeat.sh` — queue depth per queue file, `PROTOCOL-VERSION` stamp, ratified-but-unimplemented amendment count, migration-chain state. Standalone-runnable for a one-shot dump |
 | `coord-session-healthcheck.sh` | The third clock — session-external (cron/launchd). Alerts only when BOTH no coord-dir write AND no commit/worktree touch over `--window`; repeatable `--repo` (no default project paths) |
 | `coord-evidence-lint.sh` | Evidence-presence lint for mailboxes — flags a completion/state claim with no adjacent output-shaped evidence. Ceiling: presence, not truth |
@@ -433,3 +449,4 @@ Lossless-mandate WOs inherit this proving standard automatically (see WORK-ORDER
 | `retired/` | Tombstones only — retired watcher/hook **scripts were deleted** (git history retains bodies). See `retired/README.md`. Do not resurrect. |
 | `bootstrap-identity.sh` | DESIGN EXTENSION: provisional-ID generation (`--provision`) and identity adoption (`--adopt`) for the naming handshake; see § Identity Bootstrap |
 | `advanced/sqlite-mcp.README.md` | Optional advanced path: SQLite(WAL) + stdio-MCP for atomic claim (M6) — design sketch; align to persistent `coord-monitor.sh`, not the retired one-shot watcher |
+| `advanced/REMOTE-SEATS.md` | Optional remote ssh bus: second hub monitor, `watcher-remote.pid`, weak-seat idle policy; `--remote-host` requires `--remote-bus-dir` (no baked paths) |

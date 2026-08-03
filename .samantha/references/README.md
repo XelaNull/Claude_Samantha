@@ -55,6 +55,7 @@ The overlay is always *thin*: paths, the human's handle, deploy target, canonica
 | `templates/sync-cursor-persona.sh` | Generate Cursor Always Apply `.cursor/rules/samantha.mdc` from `.claude/output-styles/samantha.md` (Cursor ignores `outputStyle`) |
 | `templates/sync-cursor-agents.sh` | Generate Cursor `.cursor/agents/*.md` from `.claude/agents/` (map `sonnet`/`opus`/`haiku` → Cursor model IDs; drop Claude-only frontmatter) |
 | `templates/sync-cursor.sh` | Run both Cursor bridges (persona + agents) |
+| `coordination-protocol/advanced/REMOTE-SEATS.md` | Optional remote ssh bus for off-box Implementers (PROTOCOL 1.2.0+) |
 
 ---
 
