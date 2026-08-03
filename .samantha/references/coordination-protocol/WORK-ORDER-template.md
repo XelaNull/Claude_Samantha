@@ -56,8 +56,14 @@ Note: lossless/migration WOs inherit the Proving Standard automatically (README.
 - Depends-on WOs: WO-<M>, WO-<L>  (or "none")
 
 **Priority:** HIGH | MED | LOW
-**Gated:** yes | no  (yes = requires human sign-off before Implementer may proceed)
+**Gated:** yes | no  (yes = requires human sign-off before Implementer may proceed — list EVERY gate found, not the first; gates compound. See QUEUE-template.md § Row-Hygiene Columns for the three gate kinds.)
+**Schema:** yes | no  (yes = needs new migrations; unclaimable while a migration chain ahead of it is blocked)
+**Verified-against:** <commit SHA or PR that resolves to one — never a bare date>
 ```
+
+> **Sub-parts are a required field, not a nicety.** A full WO whose Scope names no disjoint sub-parts is flagged at HANDOFF time as **incomplete authoring** — not silently accepted and not quietly absorbed by the Implementer. A monolithic WO that genuinely cannot be split is a WO-authoring failure: decompose it.
+>
+> **Lane precision on a sub-repo split.** When one repo runs multiple Implementer seats on disjoint path lanes, each seat's presence header states its **owned path globs**, and the Orchestrator checks the WO's Scope against them at HANDOFF time. This extends the zone-routing check down to sub-repo granularity. Without it, two seats can implicitly claim overlapping files with nothing surfacing the collision until a worktree conflict does — long after both have sunk work.
 
 ### STATUS reply (DONE)
 

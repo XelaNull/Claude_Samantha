@@ -53,6 +53,12 @@ Every message follows this format exactly:
   echo "$new_message" >> "$TMPFILE"
   mv "$TMPFILE" "$MAILBOX_FILE"
   ```
+- **Evidence discipline — "the ACK is not the artifact, the file is."** Any entry asserting the state of an *external* artifact — that an action completed (merge, fetch, push, file edit, migration, deploy) **or that nothing changed** ("still untouched", "still clean", "no divergence") — must paste literal, tool-output-shaped evidence: a `state=` / `mergedAt=` line, a SHA, a `grep -n` block, a `--json` dump. Never a prose sentence describing it. Three corollaries, each earned from a real failure:
+  - **A verbatim quote alone is not evidence.** An accurate quote is only provably real because the reader could go re-verify it — which relocates exactly the manual-check burden this rule removes. Citing prose from another file requires the `grep -n` (or equivalent command output) that found it, appended to the quote.
+  - **The evidence must be fetched in the same action as the claim**, not earlier in the same turn. Stale-but-real output satisfies a naive reading of the rule while still being wrong.
+  - **Fetch-and-log-write is ONE atomic action** — never a fetch call followed by a separately-scheduled log entry. The split reliably produces a dangling claim with no value attached.
+  > Negative claims are in scope on purpose: "the file is still untouched," based on a read taken minutes ago, is the same defect wearing the opposite sign.
+  > `coord-evidence-lint.sh` mechanizes this — with a stated ceiling: it checks that evidence is *present* and output-shaped, not that it is *true*. A fabricated `state=MERGED` still passes. Its real value is converting "wrote a confident sentence" into "had to produce something shaped like output," which catches the omission failure mode (the common one) if not the fabrication one.
 - **Message-log entries: append-only at true EOF via shell `>>`** (or the write-temp-then-rename pattern above) — never anchor-based Edit. A concurrent heartbeat daemon may have appended past your anchor since your last read, and an anchor-based edit inserts mid-file, defeating tail-diff addressing. Structured header/roster fields (`watcher_pid`, `heartbeat_pid`, `state`, `last_active`, `queue_depth`) are the opposite: updated in place via Edit, never appended — see ROSTER-template.md.
 
 ---

@@ -37,7 +37,7 @@
 
 set -u
 IDENT="orchestrator"
-DIR="/Users/mrathbone/github/Nebuspace/.samantha/coord"
+DIR="${COORD_DIR:-$PWD/.samantha/coord}"
 POLL=2            # fallback poll interval (used only when fswatch is unavailable, or --force-poll)
 SAFETY_POLL=10    # event-mode slow-poll backstop + heartbeat-check cadence
 FORCE_POLL=0      # skip fswatch entirely and run poll_loop — for network-mounted coord-dirs

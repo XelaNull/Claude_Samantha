@@ -1,5 +1,9 @@
 # Coordination Protocol — Orchestrator–Implementer
 
+PROTOCOL-VERSION: 1.1.0
+
+> **Versioning:** bump `PROTOCOL-VERSION` on every ratified amendment.
+
 The file-based protocol for **dual-mode** operation: Samantha (Orchestrator) coordinating one or more Monk peer instances (Implementers) through shared files when two Claude Code processes must work in parallel.
 
 ---
@@ -265,6 +269,54 @@ Every scp / bind-mount / HMR hot-deploy to a shared runtime acquires a scoped co
 
 ---
 
+## Robustness Amendments (PROTOCOL-VERSION 1.1.0)
+
+The 6 Rules cover the *destructive* failures — a clobbered tree, a mid-flight restart. This section covers the *quiet* ones: a claim that was never true, a gate nobody flagged, a status doc that decayed while reading identically, a queue that starved while both watchdogs reported healthy. Every item below is derived from an observed incident in a live deployment, not a hypothetical.
+
+**The organizing principle is silent-vs-noisy, not mechanical-vs-written.** A rule whose violation is *noisy* — an atomic-write split that leaves a visibly dangling reference, self-announced and corrected in seconds — does not need a script; the failure announces itself. A rule whose violation is *silent* — a prose claim that reads identically to a verified one — is high-risk no matter how firmly it is written down, and needs a mechanism. Spend mechanization on the silent ones.
+
+### Evidence discipline
+Full rule in MAILBOX-template.md § Rules: any assertion about an external artifact pastes freshly-fetched, tool-output-shaped evidence, fetched in the same action as the claim; negative claims ("still untouched") included; fetch-and-log is one atomic action. Mechanized (presence, not truth) by `coord-evidence-lint.sh`.
+
+### Queue hygiene
+Full rule in QUEUE-template.md § Row-Hygiene Columns: `gated` / `schema` / `verified-against` columns, three compounding gate kinds, checked `depends-on`, banner-the-superseded-queue-file. Mechanized by `coord-gate-audit.sh` and the `coord-status.sh` metrics block.
+
+### Fail closed at the point of action
+Making *queue rows* legible does nothing about a gated action that was never a queue row. A seat that never touches the queue can push straight to a gated target — and did: a canonical ruling published to an auto-deploying public docs site with no sign-off, as a direct git push. **If the deployment has a gated target — a public/auto-deploying doc repo, canonical numbers, an ADR-Accepted marker, a safety-list surface — the check belongs at the push, not in the queue.** `coordination-precommit-hook.sh` BLOCKS (not warns) such a push unless the commit message or an accompanying coord entry carries an explicit authorization reference (`COORD_GATED_REMOTE_PATTERN` / `COORD_GATED_PATH_PATTERN`; no-op when unset).
+
+> **Ceiling, stated so it isn't over-trusted:** the authorization reference is actor-written and carries the same fabrication surface as any other claim. This does not stop a determined liar. What it buys is real but partial: the original failure was conflating *"I was told to decide"* with *"I was told to publish"*, and the hook forces that conflation into an explicit, auditable assertion at the moment of action instead of a retroactive narrative.
+
+Same shape, different surface: **`gh pr merge` never runs un-gated on a protected base.** Check `mergeable`/`mergeStateStatus` first; prefer `--auto` over `--admin`; `--admin` requires an explicit named reason in the coord log.
+
+### Remediation of an unauthorized gated action
+Codified in advance, because improvising it under pressure is how a bad hour becomes a bad day:
+- **Forward-correction only — never a history rewrite.**
+- **It does not un-publish.** Auto-deployed content may already be cached, mirrored, or indexed elsewhere. Say so; don't imply erasure.
+- **Issuing the remediation is itself a gated action**, logged as one — never folded silently into the original mistake's own cleanup.
+
+### The third clock
+The monitor/heartbeat pair is a *mutual* monitor: each proves the other's process is alive. Neither can observe "both alive, session quiet, nobody answering." That needs a clock **outside the pair** — `coord-session-healthcheck.sh`, run from cron/launchd, not inside a live session.
+
+Key it correctly or it becomes wallpaper: the trigger is absence of coord-dir activity **AND** absence of any observable work product (no new commits, no worktree mtime change) over the window — not coord-dir silence alone. A healthy seat mid-build is *supposed* to be quiet on the mailbox; alarming on that trains every seat to ignore the alarm.
+
+### Status-doc decay
+A status claim about code decays the moment the code changes, and a stale claim is byte-identical to a fresh one. Two mechanisms, each covering the other's blind spot:
+- **(a) Reverse-index at commit time.** Build `path → [status docs citing it]` from citations already present in canon; the precommit hook prints, per committed path, which docs cite it. Advisory, never blocking. **Cap the output** — a wide commit (rename sweep, promotion slice) could print a screenful, and a hook that prints a screenful gets scrolled past. Summarize (`N docs cite paths in this commit: <top 3> … +N more`) with a pointer to the full list.
+- **(b) `verified-against: <sha>` on status claims generally**, making staleness *measurable* (`git log <sha>..HEAD -- <paths>`) rather than binary.
+- Not redundant: (b) can be stamped without the check ever running. (a) fires off git's actual changed-path list, which nobody authors, so an unstamped-but-touched doc is conspicuous regardless of anyone's honesty.
+- Consequence for the 6-lens pass: drive Lens 2 from the reverse index (only docs whose cited paths moved), not a broad periodic re-read.
+
+### Amendment durability — the meta-item
+This is the item that keeps the others from lapsing. **A fix for one of these exact problems already existed once, and quietly lapsed unenforced — nobody noticed until the failure repeated.** A rule that lives only in a mailbox thread will scroll out of the archive-hygiene window and cease to exist.
+
+- **Every rule adopted from a coordination incident gets a durable home** in this reference pack or the project's CLAUDE.md — never only in a mailbox thread.
+- **Version the protocol** — the `PROTOCOL-VERSION` stamp at the top of this file, bumped on every ratified amendment, so a stale cached understanding is falsifiable against a *number* instead of prose-diffed.
+- **Track ratified-but-unbuilt items** in `PROTOCOL-AMENDMENTS.tsv` (see `PROTOCOL-AMENDMENTS.tsv.example`). `coord-status.sh` prints the version stamp plus the count of ratified-but-unimplemented items — so "we adopted a rule and never built it" is visible at the one moment every seat reliably looks. Without this, amendment durability is only a promise to remember, which is exactly the failure it names.
+
+> **Canon-versioning caveat.** Check whether the file that *defines* your protocol is itself under version control. The scripts that enforce a protocol usually live in a git repo; a project-root `CLAUDE.md` frequently does not — leaving the definition as the one unversioned link in an otherwise-auditable chain. Until it is versioned: take a timestamped copy before each edit, and scope any cross-lane review of a change explicitly to the touched region, re-read after the fact rather than assumed to cover the whole file.
+
+---
+
 ## M5 — 6-Lens Discovery Pass (Orchestrator's Standing Duty)
 
 Run this when idle and the queue is below the depth floor (>=12 buildable contracts). Each lens finds a class of work the others miss. Together they cover the full surface.
@@ -295,6 +347,10 @@ Procedure:
 
 The Orchestrator is the **sole author and committer** of protocol documents. Implementers propose only.
 
+**On ratification:** bump `PROTOCOL-VERSION` at the top of this file, give the amendment a durable home here (not only in the mailbox thread that carried it), and add a row per item to `PROTOCOL-AMENDMENTS.tsv` with its build status — so the gap between "ratified" and "actually built" stays a visible number rather than an assumption. An amendment that is half judgment-based and half mechanical is normal; the judgment half ships with the prose, and the mechanical half is tracked as build work rather than treated as already honored by discipline.
+
+**Cross-lane validation.** Protocol authoring is the Orchestrator's lane, but a change to it should get a validation pass from an Implementer before it is treated as canonical — not as a ratification gate, as a quality one: the hub does not have the spoke's lived experience of these mechanics, and a gate that feels airtight from the hub routinely misses what the spoke hits daily. In practice this has been worth it every time — the validation passes that produced *this* amendment returned substantive revisions, not rubber-stamps, on both rounds.
+
 ---
 
 ## Proving Standard
@@ -316,6 +372,11 @@ Lossless-mandate WOs inherit this proving standard automatically (see WORK-ORDER
 | `coord-send.sh` | The publish half of the coordination chat-room — auto-fills timestamp/identity/header, appends atomically to your own outbox, reads the append back to verify it landed; named args `--to`/`--tag`/`--subject`/`--body`/`--body-file` |
 | `coord-status.sh` | Read-only liveness check — verifies the watcher (`coord-monitor.sh`) and heartbeat are BOTH alive; run after any re-arm before asserting it worked |
 | `heartbeat.sh` | Idle-poke + Orchestrator discover-on-idle trigger + watcher dead-man switch (v2.1: verifies watcher.pid liveness each cadence tick, 60s arm-grace, PID-reuse guard accepting either `coord-monitor.sh` or the retired `watch-coordination.sh`; on 3 consecutive dead ticks posts `⚠️ WATCHER-DOWN` and self-terminates `exit 42`, never auto-re-arms — see § Re-arm Rules); named args; 20min idle threshold, 300s cadence |
+| `coord-protocol-metrics.sh` | Shared helpers sourced by `coord-status.sh` / `heartbeat.sh` — queue depth per queue file, `PROTOCOL-VERSION` stamp, ratified-but-unimplemented amendment count, migration-chain state. Standalone-runnable for a one-shot dump |
+| `coord-session-healthcheck.sh` | The third clock — session-external (cron/launchd). Alerts only when BOTH no coord-dir write AND no commit/worktree touch over `--window`; repeatable `--repo` (no default project paths) |
+| `coord-evidence-lint.sh` | Evidence-presence lint for mailboxes — flags a completion/state claim with no adjacent output-shaped evidence. Ceiling: presence, not truth |
+| `coord-gate-audit.sh` | Mechanical gate-audit for queue rows — checks all three gate kinds (code-comment marker, canon-prose provisional, safety-list keyword) across cited code and canon paths; marker/ACL-exclusion/safety patterns all overridable; lists every gate found, never stops at the first |
+| `PROTOCOL-AMENDMENTS.tsv.example` | Template for the ratified-amendment tracker that feeds the amendment-debt count |
 | `6-lens-audit.md` | M5: 6-lens discovery methodology — when to run, all six lenses with what to look for, output format |
 | `MAILBOX-template.md` | Message grammar, tag types, atomic-write rules, archive hygiene |
 | `WORK-ORDER-template.md` | WO format (full + one-liner tiers) and STATUS reply |

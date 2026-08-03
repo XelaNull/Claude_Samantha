@@ -8,7 +8,7 @@
 # Exit 0 iff BOTH alive; exit 1 if either is down.
 
 IDENT="orchestrator"
-DIR="/Users/mrathbone/github/Nebuspace/.samantha/coord"
+DIR="${COORD_DIR:-$PWD/.samantha/coord}"
 while [ $# -gt 0 ]; do
   case "$1" in
     --identity) IDENT="$2"; shift 2;;
@@ -32,6 +32,28 @@ H=$(alive "$SD/heartbeat.pid")
 echo "identity:  $IDENT"
 echo "watcher:   $W"
 echo "heartbeat: $H"
+
+# ── Protocol metrics (queue-depth / PROTOCOL-VERSION / amendment-debt /
+#    migration-chain) ─────────────────────────────────────────────────────────
+# Printed on every status check so ratified-but-unimplemented rules stay visible.
+# Sourced from a sibling coord-protocol-metrics.sh — skipped silently if absent
+# (this project may not have adopted the protocol-metrics layer).
+_METRICS_LIB="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/coord-protocol-metrics.sh"
+if [ -f "$_METRICS_LIB" ]; then
+  # shellcheck source=/dev/null
+  . "$_METRICS_LIB"
+  echo "--- protocol metrics ---"
+  report_protocol_meta
+  report_queue_depths "$DIR"
+  report_migration_chain "$DIR"
+  if [ -n "${_QUEUE_SHALLOW_REPOS:-}" ]; then
+    for _pair in $_QUEUE_SHALLOW_REPOS; do
+      echo "⚠️ QUEUE-SHALLOW: ${_pair%%:*} ${_pair##*:} (floor ${COORD_DEPTH_FLOOR:-12})"
+    done
+  fi
+  echo "--- end protocol metrics ---"
+fi
+
 case "$W|$H" in
   ALIVE*\|ALIVE*)
     echo "STATUS: ✅ BOTH ALIVE"

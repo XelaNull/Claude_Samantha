@@ -50,15 +50,45 @@ This is the single source of truth for all instances on the current work distrib
 
 ## Queue Table
 
-| WO-N | Title | Priority | Status | Claimed-by | Depends-on | Notes |
-|------|-------|----------|--------|------------|------------|-------|
-| WO-1 | (example) Add retry backoff | HIGH | DONE | impl-alpha | none | SHA: a3f9b2c |
-| WO-2 | (example) Write hub doc for queue system | MED | READY | — | WO-1 | waiting for WO-1 DONE |
-| WO-3 | (example) Migration: add job_type_config table | HIGH | CLAIMED | impl-beta | none | in progress |
-| WO-4 | (example) Cleanup dead dead-letter purge code | LOW | READY | — | none | |
-| WO-5 | (example) ADR: retry policy | MED | GATED | — | none | Needs human sign-off |
+| WO-N | Title | Priority | Status | Claimed-by | Depends-on | Gated | Schema | Verified-against | Notes |
+|------|-------|----------|--------|------------|------------|-------|--------|------------------|-------|
+| WO-1 | (example) Add retry backoff | HIGH | DONE | impl-alpha | none | no | no | a3f9b2c | SHA: a3f9b2c |
+| WO-2 | (example) Write hub doc for queue system | MED | READY | — | WO-1 | no | no | 9c14e0d | waiting for WO-1 DONE |
+| WO-3 | (example) Migration: add job_type_config table | HIGH | CLAIMED | impl-beta | none | no | yes | 9c14e0d | in progress |
+| WO-4 | (example) Cleanup dead dead-letter purge code | LOW | READY | — | none | no | no | — | `verified-against` blank ⇒ unswept |
+| WO-5 | (example) ADR: retry policy | MED | GATED | — | none | yes (safety-list; canon-prose `provisional`) | no | 9c14e0d | two gates — clearing one is not enough |
 
 <!-- Add new WOs at the bottom. Never delete rows. Mark DONE with SHA. -->
+
+---
+
+## Row-Hygiene Columns (additive — M8-safe)
+
+A status label alone cannot answer the three questions a seat actually has before claiming a row. Each gets its own column. These are **append-only additions** to the Queue Table above.
+
+| Column | Question it answers | Blank means |
+|--------|---------------------|-------------|
+| `gated` | Am I allowed to build this without escalation? | **UNVERIFIED-FOR-GATING** — never implicitly clear |
+| `schema` | Can this land right now, independent of gating? | unassessed |
+| `verified-against` | Is this row still *true*? | unswept, not clean |
+
+**`gated: yes/no` — and gates COMPOUND, they are not alternatives.** A multiply-gated row must list *every* gate found; clearing one does not make the row buildable. Three distinct gate *kinds* have been confirmed live, and a code-only check finds only the first:
+
+- **(a) Code-comment markers** near the files a row cites — e.g. `human-gated`, `[NO-CANON]`, or whatever marker string your project adopts. Whatever you pick, write the *exclusions* into the grep pattern itself, not into someone's memory: a project may also carry same-shaped strings that are **not** process gates (an in-app ownership ACL, say). Unexcluded, the marker degrades to noise within a week.
+- **(b) Standing safety-list membership** — resolved against the **full** list in the project's own CLAUDE.md, never a shortened restatement in the queue doc. A duplicated list drifts from its source; that drift is how a seat once cleared one of a row's three gates and believed it had cleared them all.
+- **(c) Canon-prose gates** — a gate that lives in prose rather than a code comment: a spec section marked `provisional`, `implementer-proposed`, `pending a tuning pass`. A code-path grep will never see these; the check must also scan the canon sections a row cites.
+
+`coord-gate-audit.sh` mechanizes all three (marker/ACL-exclusion/safety patterns are all overridable — the framework supplies the *shape*, your project supplies the vocabulary).
+
+**`schema: yes/no`** — a scheduling signal, not a fourth gate. A row needing new migrations is unclaimable while any migration chain ahead of it is blocked; de-prioritize while blocked, re-claimable the moment the chain clears. Hand-inference is not good enough here — it was gotten wrong within fifteen minutes of the convention being proposed. `coord-status.sh` reports `migration chain: N unapplied, blocked at <rev>` so the cell is observable rather than remembered.
+
+**`verified-against: <tree-identifying anchor>`** — the anchor must resolve to a specific tree: a commit SHA, or a PR number that resolves to one. **A bare date is not a valid anchor.** On a day the tip moves twenty-plus commits, "2026-08-03" does not identify *which* tree was checked — it is precisely the staleness this column exists to prevent, wearing a citation's clothes.
+
+**Depends-on precision.** A `depends-on` claim is itself a claim, and must be checked against the target module, not inherited from a feature-description blurb. Rows have carried both fabricated dependencies (an additive greenfield module staged as needing a "redesign" first) and missing ones (a hidden precondition staged as `none`) — found only by reading the actual target's header.
+
+> **Why all four, and why mechanized:** in one full sweep of an eleven-row queue, **every single row was wrong as staged** — at least one of status/depends-on/gated/schema incorrect on 11 of 11. Not a sampling artifact. A queue with no re-verification mechanism was 0% accurate by the time anyone looked.
+
+**Duplicate-queue-file discipline.** If a project has both a historical queue file and a live one, the historical file gets an unmistakable top-of-file banner (or an `.ARCHIVED-DO-NOT-USE` suffix). A superseded queue that merely *looks* superseded will be read as current, and a stale row will get self-picked.
 
 ---
 
@@ -89,6 +119,8 @@ When READY drops below 12:
 4. The three-bucket status broadcast is posted.
 
 The floor exists so that a fast Implementer never completes its WOs and then idles while the Orchestrator catches up. Refill on a DIP, not a drain.
+
+**The floor is a mechanically-checked assertion, not a remembered one.** `coord-status.sh` counts non-DONE/non-CLOSED rows per queue file and prints the depth alongside `BOTH ALIVE`; `heartbeat.sh` posts `QUEUE-SHALLOW: <queue> <N>` on its cadence tick when a tracked queue drops under the floor — the same channel as `WATCHER-DOWN`. This turns "forgot to check" into a structural alarm instead of depending on an Implementer yelling loud enough to be heard.
 
 ---
 

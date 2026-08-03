@@ -1,0 +1,25 @@
+# PROTOCOL-AMENDMENTS.tsv.example — template for the machine-readable tracker
+# consumed by coord-protocol-metrics.sh (amendments_unimplemented_display / count).
+#
+# Copy this file to PROTOCOL-AMENDMENTS.tsv beside coord-protocol-metrics.sh
+# (or point COORD_AMENDMENTS_FILE at wherever you keep it) and replace the
+# example rows below with your own protocol's ratified amendment items.
+#
+# PROTOCOL-VERSION: 1.0.0
+#
+# Columns: id<TAB>status<TAB>title
+# status: pending | implemented | deferred | n/a-prompt
+#   pending      — ratified, not yet built; counted in the "open" bucket
+#   implemented  — shipped; not counted
+#   deferred     — ratified but intentionally parked; reported as a separate
+#                  bucket, not "open" (permanent-park items should not float
+#                  the open-count floor forever)
+#   n/a-prompt   — a prompt-discipline item with no mechanical equivalent yet;
+#                  same non-open treatment as deferred
+#
+# "ratified-but-unimplemented" open count = pending only (actionable work).
+# Lines starting with # are ignored by the parser.
+
+item1	pending	Example: queue-depth floor mechanized in coord-status + heartbeat
+item2	implemented	Example: PROTOCOL-VERSION stamp added to this protocol's README
+item3	n/a-prompt	Example: evidence-paste discipline (prompt-only until mechanized)

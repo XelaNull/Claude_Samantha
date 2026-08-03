@@ -26,7 +26,7 @@
 
 set -u
 IDENT="orchestrator"
-DIR="/Users/mrathbone/github/Nebuspace/.samantha/coord"
+DIR="${COORD_DIR:-$PWD/.samantha/coord}"
 TO=""; TAG=""; SUBJECT=""; BODY=""; BODYFILE=""; USED_BODY_ARG=0
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -82,7 +82,7 @@ HEADER="### $TS — $IDENT → $TO — $TAG${SUBJECT:+ [$SUBJECT]}"
 
 [ -f "$OUTBOX" ] || { echo "coord-send: outbox $OUTBOX does not exist (wrong --identity/--dir?)" >&2; exit 2; }
 
-# Pre-publish loop-health check (Max's request): verify the channel before transmitting.
+# Pre-publish loop-health check (pre-publish loop-health check): verify the channel before transmitting.
 # Run coord-status.sh and surface it. Warn-and-PROCEED on DEGRADED — never block, since
 # you may need to send precisely because the loop is degraded (e.g. an alert).
 STATUS_SH="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/coord-status.sh"

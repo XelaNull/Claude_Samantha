@@ -105,6 +105,7 @@ ROLE=""
 COORD_DIR=""
 IDLE_THRESHOLD=1200   # 20 min
 CADENCE=300           # 5 min check-interval
+CHECK_QUEUES_ONCE=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -113,9 +114,41 @@ while [[ $# -gt 0 ]]; do
     --dir)            COORD_DIR="$2";      shift 2 ;;
     --idle-threshold) IDLE_THRESHOLD="$2"; shift 2 ;;
     --cadence)        CADENCE="$2";        shift 2 ;;
+    --check-queues-once) CHECK_QUEUES_ONCE=1; shift ;;
+    -h|--help)
+      echo "Usage: $0 --identity <id> --role orchestrator|implementer --dir <coord-dir> [options]"
+      echo "Options: --idle-threshold --cadence"
+      echo "         --check-queues-once   print QUEUE-SHALLOW alerts for shallow queue-*.md and exit"
+      echo "                               (no pidfile; for synthetic/proof runs — requires a sibling"
+      echo "                               coord-protocol-metrics.sh beside this script)"
+      exit 0 ;;
     *) echo "ERROR: unknown argument: $1" >&2; exit 1 ;;
   esac
 done
+
+# Synthetic/proof path: no identity required beyond --dir. Does not claim a
+# pidfile — safe to run standalone without disturbing a live-armed heartbeat.
+if [[ "$CHECK_QUEUES_ONCE" == 1 ]]; then
+  [[ -n "$COORD_DIR" ]] || { echo "ERROR: --check-queues-once requires --dir" >&2; exit 1; }
+  _METRICS_LIB="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/coord-protocol-metrics.sh"
+  if [[ ! -f "$_METRICS_LIB" ]]; then
+    echo "ERROR: coord-protocol-metrics.sh not found beside $0 — cannot check queue depth." >&2
+    exit 1
+  fi
+  # shellcheck source=/dev/null
+  . "$_METRICS_LIB"
+  report_queue_depths "$COORD_DIR"
+  _any=0
+  if [[ -n "${_QUEUE_SHALLOW_REPOS:-}" ]]; then
+    for _pair in $_QUEUE_SHALLOW_REPOS; do
+      echo "⚠️ QUEUE-SHALLOW: ${_pair%%:*} ${_pair##*:} (floor ${COORD_DEPTH_FLOOR:-12})"
+      _any=1
+    done
+  fi
+  [[ "$_any" -eq 1 ]] && exit 1
+  echo "OK: all tracked queue-*.md meet depth floor ${COORD_DEPTH_FLOOR:-12}"
+  exit 0
+fi
 
 if [[ -z "$IDENTITY" || -z "$ROLE" || -z "$COORD_DIR" ]]; then
   echo "ERROR: --identity, --role, and --dir are all required." >&2
@@ -402,6 +435,27 @@ while true; do
       trip_watcher_down_alarm
       # trip_watcher_down_alarm always exits (42) — unreachable, but explicit for readers.
       exit 42
+    fi
+  fi
+
+  # QUEUE-SHALLOW: reported on every cadence tick (same stdout channel as
+  # HEARTBEAT DOWN / WATCHER-DOWN). Does not exit — a shallow queue is
+  # recoverable, not a dead-man condition. Silently skipped if this project
+  # has not adopted coord-protocol-metrics.sh (sibling script absent).
+  if [[ -z "${_METRICS_SOURCED:-}" ]]; then
+    _METRICS_LIB="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/coord-protocol-metrics.sh"
+    if [[ -f "$_METRICS_LIB" ]]; then
+      # shellcheck source=/dev/null
+      . "$_METRICS_LIB"
+      _METRICS_SOURCED=1
+    fi
+  fi
+  if [[ "${_METRICS_SOURCED:-}" == 1 ]]; then
+    report_queue_depths "$COORD_DIR" >/dev/null
+    if [[ -n "${_QUEUE_SHALLOW_REPOS:-}" ]]; then
+      for _pair in $_QUEUE_SHALLOW_REPOS; do
+        echo "⚠️ QUEUE-SHALLOW: ${_pair%%:*} ${_pair##*:} (floor ${COORD_DEPTH_FLOOR:-12})"
+      done
     fi
   fi
 

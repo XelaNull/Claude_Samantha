@@ -346,6 +346,158 @@ else
   echo "INFO [secret-scan]: no staged changes found."
 fi
 
+# ── check 4: canon-doc reverse-index advisory ─────────────────────────────────
+# Advisory only — never sets FAIL. If a project keeps canon/spec docs that cite
+# source paths (e.g. "services/foo/bar.py"), this builds a cheap reverse index
+# so a commit touching a cited path surfaces "N docs mention this" — a nudge to
+# check whether the doc needs updating, without blocking the commit on it.
+# No project-specific default doc root is assumed — set COORD_CANON_DOCS_DIR
+# (a directory of *.md files) and COORD_CANON_CITE_PATTERN (a regex matching
+# the source-path shape your docs cite, e.g. 'services/[A-Za-z0-9_./-]+\.py')
+# to enable this check. Silently skipped when either is unset.
+_CANON_DOCS_DIR="${COORD_CANON_DOCS_DIR:-}"
+_CANON_CITE_PATTERN="${COORD_CANON_CITE_PATTERN:-}"
+_INDEX_CACHE="${COORD_DIR:-/tmp}/.watch-state/path-doc-index.tsv"
+if [[ -n "$_CANON_DOCS_DIR" && -n "$_CANON_CITE_PATTERN" && ( "$cmd_field" == *"git commit"* || "$cmd_field" == *"git push"* || "$cmd_field" == *"standalone"* ) ]]; then
+  _changed_paths=$(git diff --cached --name-only 2>/dev/null || true)
+  if [[ -z "$_changed_paths" && "$cmd_field" == *"git push"* ]]; then
+    _changed_paths=$(git diff --name-only "@{upstream}..HEAD" 2>/dev/null || git diff --name-only "HEAD~5..HEAD" 2>/dev/null || true)
+  fi
+  if [[ -n "$_changed_paths" && -d "$_CANON_DOCS_DIR" ]]; then
+    mkdir -p "$(dirname "$_INDEX_CACHE")" 2>/dev/null || true
+    # Rebuild cache if missing or docs dir newer than cache (best-effort).
+    _rebuild=0
+    if [[ ! -f "$_INDEX_CACHE" ]]; then
+      _rebuild=1
+    elif [[ -n "$(find "$_CANON_DOCS_DIR" -type f -name '*.md' -newer "$_INDEX_CACHE" 2>/dev/null | head -1)" ]]; then
+      _rebuild=1
+    fi
+    if [[ "$_rebuild" -eq 1 ]]; then
+      CANON_CITE_PATTERN="$_CANON_CITE_PATTERN" python3 - "$_CANON_DOCS_DIR" "$_INDEX_CACHE" <<'PY' 2>/dev/null || true
+import os, re, sys
+from pathlib import Path
+docs, out = Path(sys.argv[1]), Path(sys.argv[2])
+pat = re.compile(os.environ["CANON_CITE_PATTERN"])
+index = {}
+for md in docs.rglob("*.md"):
+    try:
+        text = md.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        continue
+    rel = str(md)
+    for m in pat.finditer(text):
+        index.setdefault(m.group(0), set()).add(rel)
+with out.open("w", encoding="utf-8") as f:
+    for path, docs_set in sorted(index.items()):
+        f.write(path + "\t" + "|".join(sorted(docs_set)) + "\n")
+PY
+    fi
+    if [[ -f "$_INDEX_CACHE" ]]; then
+      _cite_summary=$(CHANGED_PATHS="$_changed_paths" python3 - "$_INDEX_CACHE" <<'PY'
+import os, sys
+from collections import Counter
+cache = sys.argv[1]
+index = {}
+for line in open(cache, encoding="utf-8", errors="replace"):
+    line = line.rstrip("\n")
+    if not line or "\t" not in line:
+        continue
+    path, docs = line.split("\t", 1)
+    index[path] = docs.split("|") if docs else []
+hits = Counter()
+changed = [ln.strip() for ln in os.environ.get("CHANGED_PATHS", "").splitlines() if ln.strip()]
+for p in changed:
+    base = p.split("/")[-1]
+    for k, docs in index.items():
+        if k == p or k.endswith("/" + base) or k.endswith(base):
+            for d in docs:
+                hits[d] += 1
+if not hits:
+    print("")
+    sys.exit(0)
+top = hits.most_common(3)
+n = len(hits)
+names = [t[0].rsplit("/", 1)[-1] for t in top]
+more = n - len(names)
+msg = f"{n} docs cite paths in this commit: " + ", ".join(names)
+if more > 0:
+    msg += f" … +{more} more (full list: {cache})"
+print(msg)
+PY
+)
+      if [[ -n "$_cite_summary" ]]; then
+        echo ""
+        echo "ADVISORY [canon-doc reverse-index]: $_cite_summary"
+      else
+        echo "OK [canon-doc reverse-index]: no canon-doc citations for staged paths."
+      fi
+    fi
+  fi
+fi
+
+# ── check 5: fail-closed gated push ───────────────────────────────────────────
+# BLOCK a push to a gated remote/target, OR a commit touching gated paths,
+# without an explicit authorization reference in the commit message(s) (or
+# COORD_AUTH_REF env). This is a project-configurable gate — with no config
+# set, this check is a no-op (nothing is gated by default).
+#
+# Ceiling: the reference string is actor-written — this forces an auditable
+# assertion at the point of action; it does not prove the authorization is
+# genuine. It blocks accidental publish, not a determined fabrication.
+#
+# Configuration (all optional; unset = that gate class is disabled):
+#   COORD_GATED_REMOTE_PATTERN   grep -E pattern matched against `git remote -v`
+#                                 output and cwd (e.g. a public-auto-deploy repo)
+#   COORD_GATED_PATH_PATTERN     grep -E pattern matched against changed/pushed
+#                                 paths (e.g. canon docs, ADRs, a DECISIONS.md)
+#   COORD_AUTH_REF               if set (non-empty), always satisfies the gate
+_GATED_REMOTE_PATTERN="${COORD_GATED_REMOTE_PATTERN:-}"
+_GATED_PATH_PATTERN="${COORD_GATED_PATH_PATTERN:-}"
+
+_auth_ref_ok() {
+  local blob="$1"
+  printf '%s' "$blob" | grep -qiE \
+    '(AUTH:|authorized[[:space:]]+by|human[[:space:]]+GO|human-GO|COORD-AUTH:|DECISION-[A-Z0-9-]+|sign-off:|human[[:space:]]+sign-?off)' \
+    && return 0
+  [[ -n "${COORD_AUTH_REF:-}" ]] && return 0
+  return 1
+}
+
+if [[ ( -n "$_GATED_REMOTE_PATTERN" || -n "$_GATED_PATH_PATTERN" ) && "$cmd_field" == *"git push"* ]]; then
+  _push_gated=0
+  _push_why=""
+  _remotes=$(git remote -v 2>/dev/null || true)
+  _cwd=$(pwd -P 2>/dev/null || pwd)
+  if [[ -n "$_GATED_REMOTE_PATTERN" ]] && printf '%s\n' "$_remotes" "$_cwd" | grep -qiE "$_GATED_REMOTE_PATTERN"; then
+    _push_gated=1
+    _push_why="remote/cwd matches gated-remote pattern"
+  fi
+  if [[ -n "$_GATED_PATH_PATTERN" ]]; then
+    _push_paths=$(git diff --name-only "@{upstream}..HEAD" 2>/dev/null || git diff --name-only "HEAD~3..HEAD" 2>/dev/null || true)
+    if printf '%s\n' "$_push_paths" | grep -qiE "$_GATED_PATH_PATTERN"; then
+      _push_gated=1
+      _push_why="${_push_why:+$_push_why; }changed paths hit gated-path pattern"
+    fi
+  fi
+  if [[ "$_push_gated" -eq 1 ]]; then
+    _msgs=$(git log --format=%B "@{upstream}..HEAD" 2>/dev/null || git log -3 --format=%B 2>/dev/null || true)
+    if _auth_ref_ok "$_msgs"; then
+      echo "OK [gated-push]: gated target, authorization reference present in commit message(s) or COORD_AUTH_REF."
+    else
+      echo ""
+      echo "FAIL [gated-push]: push touches a gated target without an authorization reference."
+      echo "  reason: ${_push_why:-gated}"
+      echo "  Include AUTH:/human GO/DECISION-…/sign-off: in the commit message, or export COORD_AUTH_REF=…"
+      echo "  Ceiling: reference is actor-written — this blocks accidental publish, not determined fabrication."
+      FAIL=1
+    fi
+  else
+    echo "OK [gated-push]: push target not on the configured gated list."
+  fi
+elif [[ "$cmd_field" == *"git push"* ]]; then
+  echo "INFO [gated-push]: no COORD_GATED_REMOTE_PATTERN / COORD_GATED_PATH_PATTERN configured — gate disabled."
+fi
+
 # ── dump roster (informational) ───────────────────────────────────────────────
 
 if [[ -n "$COORD_DIR" && -d "$COORD_DIR" ]]; then
@@ -365,7 +517,7 @@ fi
 echo ""
 if [[ $FAIL -ne 0 ]]; then
   echo "PRE-COMMIT HOOK: FAILED. Resolve the issues above before committing."
-  emit '{"permission":"deny","user_message":"Pre-commit hook blocked: unread mailbox and/or possible secret in staged diff.","agent_message":"Read your mailbox / remove the secret, then retry."}'
+  emit '{"permission":"deny","user_message":"Pre-commit hook blocked: unread mailbox, secret, and/or gated push without auth reference.","agent_message":"Read mailbox / remove secret / add an auth reference for gated push, then retry."}'
   exit 2
 else
   echo "PRE-COMMIT HOOK: PASSED. Proceeding with commit."
