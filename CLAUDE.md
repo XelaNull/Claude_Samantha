@@ -1,6 +1,6 @@
 # Samantha Prime — Project Context
 
-**Samantha's persona lives in the output-style** (`.claude/output-styles/samantha.md`), auto-loaded via `.claude/settings.json` (`outputStyle: Samantha`). This file is project context + the adoption guide — not her identity.
+**Samantha's persona** — source of truth is `.claude/output-styles/samantha.md`. **Claude Code** auto-loads it via `.claude/settings.json` (`outputStyle: Samantha`). **Cursor** ignores `outputStyle`; it loads the generated Always Apply rule `.cursor/rules/samantha.mdc` (sync with `.samantha/references/templates/sync-cursor-persona.sh` after editing the output-style). This file is project context + the adoption guide — not her identity.
 
 ---
 
@@ -10,6 +10,7 @@ This is the **canonical Samantha Prime framework** — the portable orchestrator
 
 Namespace:
 - **`.claude/`** — harness-discovered files only: agent defs (`agents/`), skills (`skills/`), output-style (`output-styles/`), settings and hooks (`settings*.json`)
+- **`.cursor/rules/`** — Cursor Always Apply bridge for the persona (`samantha.mdc`, generated from the output-style — do not hand-edit)
 - **`.samantha/`** — framework data and state: memory (`memory/`), agent memory (`agents/<name>/`), plans (`plans/`), specs (`specs/`), the Reference Pack (`references/`)
 
 **Deployment catalog.** Every downstream install of this framework is tracked in [`.samantha/DEPLOYMENTS.md`](.samantha/DEPLOYMENTS.md) — the map of *where* to propagate when canon changes here, the safe update procedure, and the per-site customizations to preserve. Read it before pushing an update outward; keep it current when you install into a new location.
@@ -24,11 +25,17 @@ When adopting this framework into a new project:
 Copy these directories from this repo into the new project's root:
 - `.claude/agents/` — all six agent definitions
 - `.claude/skills/` — all skill files
-- `.claude/output-styles/` — the Samantha persona
-- `.claude/settings.json` — sets `outputStyle: Samantha` as the project default
-- `.samantha/references/` — the Reference Pack (coordination protocol, ADR process, OKF format, docs-system recipe)
+- `.claude/output-styles/` — the Samantha persona (source of truth)
+- `.claude/settings.json` — sets `outputStyle: Samantha` as the project default (Claude Code)
+- `.samantha/references/` — the Reference Pack (coordination protocol, ADR process, OKF format, docs-system recipe; includes `templates/sync-cursor-persona.sh`)
 - `.samantha/agents/` — per-agent memory directories (the `.example` template only; see Step 2)
 - `.samantha/memory/` — project memory directory (the `.example` template only; see Step 2)
+
+Then generate the Cursor persona bridge from the output-style (required for Cursor Agent; harmless on Claude Code-only installs):
+```bash
+bash .samantha/references/templates/sync-cursor-persona.sh .
+```
+That writes `.cursor/rules/samantha.mdc` (`alwaysApply: true`). Re-run after any edit to the output-style's `## Project-Specific Context`.
 
 Copy `.claude/settings.local.json` only if the new project needs the same hooks; otherwise create a fresh one.
 
@@ -44,6 +51,8 @@ Open `.claude/output-styles/samantha.md` and fill in the `## Project-Specific Co
 - Project name / workspace path
 - Build / test / lint commands
 - Key patterns, pitfalls, project-specific reminders
+
+Then re-run `bash .samantha/references/templates/sync-cursor-persona.sh .` so the Cursor Always Apply rule picks up the overlay. Never hand-edit `.cursor/rules/samantha.mdc`.
 
 **Step 4 — Customize the agents.**
 In each `.claude/agents/*.md`, fill in the `## Project-Specific Extensions` section:

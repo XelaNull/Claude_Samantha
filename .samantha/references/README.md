@@ -52,6 +52,7 @@ The overlay is always *thin*: paths, the human's handle, deploy target, canonica
 | `templates/` | Canonical forge templates for skills and workflows |
 | `templates/SKILL-template/SKILL.md` | Canonical SKILL.md — frontmatter options + body structure, heavily commented |
 | `templates/WORKFLOW-template.js` | Canonical workflow — meta object + primitives, heavily commented |
+| `templates/sync-cursor-persona.sh` | Generate Cursor Always Apply `.cursor/rules/samantha.mdc` from `.claude/output-styles/samantha.md` (Cursor ignores `outputStyle`) |
 
 ---
 

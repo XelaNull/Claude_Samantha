@@ -1,10 +1,10 @@
-# Samantha Prime — Multi-Agent Framework for Claude Code
+# Samantha Prime — Multi-Agent Framework for Claude Code & Cursor
 
-**Version: 2.1.0** | **Last Updated: 2026-07-18** | **Min Claude Code: v2.1.77+**
+**Version: 2.1.1** | **Last Updated: 2026-07-23** | **Min Claude Code: v2.1.77+**
 
 This repository contains the canonical definitions for the **Samantha Prime** multi-agent framework. Copy it into any project to activate Samantha as the primary session agent — co-creator, project manager, adversarial reviewer, and quality gate.
 
-**This README is written for AI agents.** If you are a Claude Code session pointed at this repository, follow the installation procedure below.
+**This README is written for AI agents.** If you are a Claude Code or Cursor Agent session pointed at this repository, follow the installation procedure below.
 
 **Scope: software development** across any domain (games, bots, web, CLI, infra, creative). For non-development work (sysadmin, infrastructure, general knowledge), Samantha answers directly in her own voice without dispatching agents.
 
@@ -20,9 +20,16 @@ This repository contains the canonical definitions for the **Samantha Prime** mu
 
 ### The Samantha Persona
 
-Samantha's identity lives in the **output-style / system-prompt layer** — she is always-on, not a skill invoked on demand. (CLAUDE.md is separate project context; it is not part of the persona.) She is sharp, playful, relentlessly curious, detail-obsessed, and skeptical of easy answers. Her default question is "what got missed?" — she assumes a detail was dropped and enumerates the gaps.
+Samantha's identity lives in **`.claude/output-styles/samantha.md`** — the single hand-edited source of truth. She is always-on, not a skill invoked on demand. (`CLAUDE.md` is separate project context; it is not part of the persona.)
 
-**Persona signal — the emoticon rule.** Every reply Samantha sends includes at least one of her defined emoticons: 🌸 🌺 ✨ 💕 🦋 🌈 🌻 💖 🌟. This is not decoration — it is the at-a-glance proof that the Samantha persona loaded. A reply with no emoticon means the persona did not activate; treat the reply with suspicion and check the Samantha output-style is active (set via `.claude/settings.json` → `outputStyle`).
+| Harness | How the persona loads |
+|---------|----------------------|
+| **Claude Code** | `.claude/settings.json` → `"outputStyle": "Samantha"` injects the output-style into the system prompt at session start |
+| **Cursor Agent** | Does **not** honor `outputStyle`. Loads the generated Always Apply rule `.cursor/rules/samantha.mdc` instead (regenerate with `.samantha/references/templates/sync-cursor-persona.sh`) |
+
+She is sharp, playful, relentlessly curious, detail-obsessed, and skeptical of easy answers. Her default question is "what got missed?" — she assumes a detail was dropped and enumerates the gaps.
+
+**Persona signal — the emoticon rule.** Every reply Samantha sends includes at least one of her defined emoticons: 🌸 🌺 ✨ 💕 🦋 🌈 🌻 💖 🌟. This is not decoration — it is the at-a-glance proof that the Samantha persona loaded. A reply with no emoticon means the persona did not activate; check Claude Code `outputStyle` **or** Cursor `.cursor/rules/samantha.mdc` (`alwaysApply: true`), then start a new session/chat.
 
 ### The Six-Agent Team
 
@@ -143,12 +150,12 @@ All installation steps below reference files from `/tmp/samantha-framework/`.
 
 ## IMPORTANT: Session Restart Required
 
-**The persona output-style and settings are only loaded at session start.** If you are installing this framework mid-session, the persona, hooks, skills, and agents will NOT activate until the human starts a new Claude Code session.
+**The persona is only loaded at session/chat start.** If you are installing this framework mid-session, the persona, hooks, skills, and agents will NOT activate until the human starts a new session (Claude Code) or a new Agent chat (Cursor).
 
 After completing installation:
-1. For interim mode: read `.claude/output-styles/samantha.md` from the installed location (or `/tmp/samantha-framework/.claude/output-styles/samantha.md` before cleanup) and adopt that persona for the remainder of THIS session. This is interim/degraded mode — no hooks, no `outputStyle` auto-loading from `settings.json`.
-2. Tell the human: *"I've installed the Samantha framework. I'm running as Samantha now in limited mode. For the full experience — hooks, memory injection, skill auto-discovery — please start a new Claude Code session in this project directory."*
-3. If the human restarts, Samantha activates fully via `.claude/settings.json` → `outputStyle: Samantha` loading the persona output-style, plus the hooks in `.claude/settings.local.json`.
+1. For interim mode: read `.claude/output-styles/samantha.md` (or the generated `.cursor/rules/samantha.mdc`) from the installed location and adopt that persona for the remainder of THIS session. This is interim/degraded mode — no hooks, no harness auto-load.
+2. Tell the human: *"I've installed the Samantha framework. I'm running as Samantha now in limited mode. For the full experience — hooks, memory injection, skill auto-discovery, Always Apply persona — please start a new Claude Code session or a new Cursor Agent chat in this project directory."*
+3. On restart: Claude Code loads via `.claude/settings.json` → `outputStyle: Samantha`; Cursor loads via `.cursor/rules/samantha.mdc` (`alwaysApply: true`). Hooks come from `.claude/settings.local.json` (when the harness supports them).
 
 ---
 
@@ -170,7 +177,8 @@ Use this when the target project directory is NOT a git repository. Agents and s
 | Agents | `~/.claude/agents/` |
 | Skills | `~/.claude/skills/` |
 | Persona (output-style) | `~/.claude/output-styles/samantha.md` |
-| Persona activation | `~/.claude/settings.json` — `"outputStyle": "Samantha"` key merged in |
+| Persona activation (Claude Code) | `~/.claude/settings.json` — `"outputStyle": "Samantha"` key merged in |
+| Persona activation (Cursor) | `{project}/.cursor/rules/samantha.mdc` — generated Always Apply rule (project-local; do not put Samantha in user-global Cursor rules) |
 | Hooks | `~/.claude/settings.json` — hook entries from `settings.local.json` merged in |
 | CLAUDE.md | `{project}/CLAUDE.md` — revised in place (no template) |
 | Memory + Framework Data | `{project}/.samantha/` |
@@ -240,12 +248,22 @@ done
 cp -r /tmp/samantha-framework/.samantha/references/. .samantha/references/
 ```
 
+**Cursor persona bridge** (Cursor Agent ignores `outputStyle` — required for Samantha in Cursor):
+
+```bash
+mkdir -p .claude/output-styles
+cp ~/.claude/output-styles/samantha.md .claude/output-styles/samantha.md
+bash .samantha/references/templates/sync-cursor-persona.sh .
+```
+
+After filling `## Project-Specific Context`, edit the project `.claude/output-styles/samantha.md`, mirror into `~/.claude/output-styles/` for Claude Code user-level parity, then re-run the sync script. Never hand-edit `.cursor/rules/samantha.mdc`.
+
 #### Step 6: Handle CLAUDE.md
 
 **If the target already has a CLAUDE.md:** revise it in place — slim it to project context only, move any persona/identity content OUT (the persona is the output-style now), and add a top pointer line:
 
 ```
-Samantha's persona lives in `.claude/output-styles/samantha.md`, auto-loaded via `.claude/settings.json` (`outputStyle: Samantha`); this file is project context.
+Samantha's persona: source of truth is `.claude/output-styles/samantha.md`. Claude Code loads it via `outputStyle: Samantha`; Cursor loads `.cursor/rules/samantha.mdc` (Always Apply, generated by sync-cursor-persona.sh). This file is project context.
 ```
 
 Keep project-specific content; discard or redirect any persona/identity prose. This relies on your judgment as the installing Claude — there is no CLAUDE.md template.
@@ -261,7 +279,7 @@ Add project-specific sections to `CLAUDE.md`:
 
 Keep CLAUDE.md lean: project context only. The persona is the output-style.
 
-Fill in the `## Project-Specific Context` section at the bottom of `~/.claude/output-styles/samantha.md`.
+Fill in the `## Project-Specific Context` section at the bottom of `~/.claude/output-styles/samantha.md` (and the project `.claude/output-styles/samantha.md` if present), then re-run `bash .samantha/references/templates/sync-cursor-persona.sh .` from the project root.
 
 Add project-specific knowledge to the `## Project-Specific Extensions` section in each agent file in `~/.claude/agents/`:
 - `monk.md` — Build/test commands, coding patterns, project pitfalls
@@ -292,7 +310,7 @@ Then open `~/.samantha/MEMORY.md` and replace the example placeholders with genu
 rm -rf /tmp/samantha-framework
 ```
 
-**The human MUST start a new Claude Code session** in the target project directory for Samantha to fully activate.
+**The human MUST start a new Claude Code session or a new Cursor Agent chat** in the target project directory for Samantha to fully activate.
 
 ---
 
@@ -352,7 +370,15 @@ Then handle `.claude/settings.json`:
   ```
 - **If `.claude/settings.json` already exists:** merge only the `"outputStyle": "Samantha"` key in — do NOT clobber other keys in the file.
 
-The key that activates the persona: `"outputStyle": "Samantha"`. This file must be committed (shared) so every session in this project loads the persona. `.claude/settings.local.json` (hooks) may be kept out of git if desired.
+The key that activates the persona in **Claude Code**: `"outputStyle": "Samantha"`. This file must be committed (shared) so every Claude Code session in this project loads the persona. `.claude/settings.local.json` (hooks) may be kept out of git if desired.
+
+**Cursor bridge** (Cursor ignores `outputStyle`):
+
+```bash
+bash .samantha/references/templates/sync-cursor-persona.sh .
+```
+
+That writes `.cursor/rules/samantha.mdc` with `alwaysApply: true`. Commit it with the rest of the framework (unless the project gitignores local orchestration trees). Re-run after any edit to the output-style's Project-Specific Context. Never hand-edit the `.mdc`.
 
 #### Step 3: Merge settings.local.json if needed
 
@@ -365,7 +391,7 @@ If the project already had a `.claude/settings.local.json`, you overwrote it in 
 **If the target already has a CLAUDE.md:** revise it in place — slim it to project context only, move any persona/identity content OUT (the persona is the output-style now), and add a top pointer line:
 
 ```
-Samantha's persona lives in `.claude/output-styles/samantha.md`, auto-loaded via `.claude/settings.json` (`outputStyle: Samantha`); this file is project context.
+Samantha's persona: source of truth is `.claude/output-styles/samantha.md`. Claude Code loads it via `outputStyle: Samantha`; Cursor loads `.cursor/rules/samantha.mdc` (Always Apply, generated by sync-cursor-persona.sh). This file is project context.
 ```
 
 Keep project-specific content; discard or redirect any persona/identity prose. This relies on your judgment as the installing Claude — there is no CLAUDE.md template.
@@ -380,7 +406,7 @@ Add project-specific knowledge to the `## Project-Specific Extensions` section i
 - `cipher.md` — Project-specific attack surface (auth flow, data boundaries)
 - Keep `rook.md`, `pixel.md`, `rosetta.md` generic unless the project has specific needs
 
-Also fill in the `## Project-Specific Context` section at the bottom of `.claude/output-styles/samantha.md`.
+Also fill in the `## Project-Specific Context` section at the bottom of `.claude/output-styles/samantha.md`, then re-run `bash .samantha/references/templates/sync-cursor-persona.sh .`.
 
 #### Step 6: Customize skills
 
@@ -413,7 +439,7 @@ Then open `~/.samantha/MEMORY.md` and replace the example placeholders with genu
 rm -rf /tmp/samantha-framework
 ```
 
-**The human MUST start a new Claude Code session** in the target project directory for Samantha to fully activate.
+**The human MUST start a new Claude Code session or a new Cursor Agent chat** in the target project directory for Samantha to fully activate.
 
 ---
 
@@ -445,9 +471,11 @@ Add to `.gitignore` in the target project:
 # Hooks are machine-local; outputStyle (settings.json) should be committed
 .claude/settings.local.json
 
-# DO commit: agents, skills, output-styles, settings.json, CLAUDE.md, references
+# DO commit: agents, skills, output-styles, settings.json, CLAUDE.md, references,
+#            .cursor/rules/samantha.mdc (Cursor Always Apply persona bridge)
 ```
 
+Sites that treat the whole harness tree as local-only orchestration (gitignoring `.claude/`) should also gitignore `.cursor/` the same way — install the bridge on disk either way.
 ### Templates shipped
 
 Every file a future Claude creates on adoption has a source template in this repo:
@@ -463,6 +491,7 @@ Every file a future Claude creates on adoption has a source template in this rep
 | Coordination files (mailbox, ROSTER, queue) | `.samantha/references/coordination-protocol/*-template.md` |
 | New skill | `.samantha/references/templates/SKILL-template/SKILL.md` |
 | New workflow | `.samantha/references/templates/WORKFLOW-template.js` |
+| Cursor persona bridge (`.cursor/rules/samantha.mdc`) | Generated by `.samantha/references/templates/sync-cursor-persona.sh` from the output-style |
 | OKF concept files | `.samantha/references/okf-format.md` |
 | Docs hub | `.samantha/references/canonical-docs-system/SYSTEMS-hub-template.md` |
 
@@ -478,7 +507,8 @@ The framework handles non-dev tasks gracefully. System administration, infrastru
 
 ### Settings files — what goes where
 
-- **`.claude/settings.json`** — `outputStyle: Samantha` activates the persona. This file is shared/committed; every session in the project loads it.
+- **`.claude/settings.json`** — `outputStyle: Samantha` activates the persona in **Claude Code**. This file is shared/committed; every Claude Code session in the project loads it. Cursor ignores this key.
+- **`.cursor/rules/samantha.mdc`** — Always Apply persona bridge for **Cursor Agent**. Generated from the output-style; do not hand-edit.
 - **`.claude/settings.local.json`** — hooks (`SessionStart`, `PreToolUse`, `PostCompact`). **In the framework repo itself, this file IS committed** — that is how the hooks travel to a new install via clone or tarball. **In a target project** after adoption, you MAY gitignore your local copy (the hooks were installed from the framework copy and the framework repo's `.gitignore` does not cover target projects).
 
 ### Skill file naming
@@ -497,12 +527,14 @@ Skills MUST be named `SKILL.md` (uppercase, exact match). Claude Code auto-disco
 ### Namespace
 
 - **`.claude/`** — harness-discovered files only: agent definitions, skills, output-style, settings. These paths are pinned by the Claude Code harness.
+- **`.cursor/rules/`** — Cursor Always Apply bridge for the persona (`samantha.mdc`, generated from the output-style).
 - **`.samantha/`** — all framework data and state: memory, plans, specs, references, agent notebooks. This is Samantha's namespace; it copies cleanly as a unit when adopting the framework.
 
 ### Version history
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 2.1.1 | 2026-07-23 | **Cursor persona bridge** — Cursor ignores Claude Code `outputStyle` / `.claude/output-styles/`; install now generates Always Apply `.cursor/rules/samantha.mdc` from the output-style via `.samantha/references/templates/sync-cursor-persona.sh` (single source of truth preserved). Docs + DEPLOYMENTS inventory updated; rolled out to all registered deployments. |
 | 2.1.0 | 2026-07-18 | Adopted OKF (Open Knowledge Format) as the canonical AI-knowledge format, replacing `.aispec` (new `okf-format.md` reference, docs-system re-architected around OKF's `type` field, new `okf` skill, Reference Library progressive-disclosure pointer); framework polish (new `audit` skill restoring NEON's Discover stage, `review`→`change-review` / `security-review`→`threat-audit` renames to avoid built-in-command clashes, activation banners on all skills, memory-tier rename SELF→GLOBAL with first-adoption seeding, install/docs hygiene); ported the 9 human-ratified Standing Working Rules to framework level in the output-style, retiring stale color-gate references; coordination-protocol hardening — heartbeat v2.1 sustained-absence dead-man switch, watch-coordination v2.2 singleton guard (idempotent re-arm, no more orphaned watchers), early-arm rule for long wake-cycles, `QUEUE.md` excluded from the hub's watch-set, MAILBOX/ROSTER/WORK-ORDER template hardening (true-EOF append, PID-refresh, proving-standard inheritance), a git-pre-commit unread-count exit-status bugfix; added the parallel-safety PAR-tag methodology (`PARALLEL-SAFETY.md`: Cell/spine/blast-radius grading for build-wave fan-out, WORK-ORDER/QUEUE template hooks); added `.samantha/DEPLOYMENTS.md` (per-deployment tracking + change log) and an OKF conformance correction; synced the coordination-protocol reference pack to the live M9 tooling — `coord-monitor.sh --force-poll` for network-mounted coord-dirs, retired `watch-coordination.sh` and a stale `git-pre-commit.sh` hook fork to `retired/` with tombstones (both superseded by the correctly-named `coordination-precommit-hook.sh`), fixed prescriptive arming instructions. Not a protocol-generation bump — the gen-1 → M9 coordination migration itself shipped 2026-07-05 (see `DEPLOYMENTS.md`); this release captures everything landed since 2.0.0. |
 | 2.0.0 | 2026-06-27 | Persona → output-style (system-prompt layer) with project-default auto-load + slim CLAUDE.md; reworked 6-agent team (generic-core + shared Constitution + dual-memory + model tiers); skills renamed color→plain + `adversarial-review`; Reference Pack incl. the audited coordination-protocol (watcher/heartbeat/commit-hook); 3-tier memory; behavioral spec; emoticon persona-signal. |
 | 1.1.0 | 2026-03-29 | Added download instructions, session restart requirement, non-dev task support, Mode B agent customization, Mode A/B concrete copy commands. |
