@@ -6,10 +6,12 @@ user-invocable: true
 
 # COMMIT -- Lightweight Commit
 
-**Activation banner (REQUIRED — first output).** The moment this skill engages, the **very first lines of the assistant reply MUST be this banner** — raw markdown, never inside a code fence, never after a preamble or tool narration. If the banner is missing, the skill did not engage.
+**Activation banner (REQUIRED — first output).** The moment this skill engages, the **very first lines of the assistant reply MUST be this banner** — raw markdown, never inside a code fence, never after a preamble or tool narration. Emit the three banner lines with a **blank line between each** (top rule, title, bottom rule) so chat UIs do not soft-wrap them into one paragraph. If the banner is missing, the skill did not engage.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 💾 **SKILL · COMMIT** — lightweight save
+
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 Quick commit path. No build, no test, no specialist review. The human trusts what's there.

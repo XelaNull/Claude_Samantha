@@ -6,10 +6,12 @@ user-invocable: true
 
 # AUDIT -- Code↔Doc Discovery → Backlog
 
-**Activation banner (REQUIRED — first output).** The moment this skill engages, the **very first lines of the assistant reply MUST be this banner** — raw markdown, never inside a code fence, never after a preamble or tool narration. If the banner is missing, the skill did not engage.
+**Activation banner (REQUIRED — first output).** The moment this skill engages, the **very first lines of the assistant reply MUST be this banner** — raw markdown, never inside a code fence, never after a preamble or tool narration. Emit the three banner lines with a **blank line between each** (top rule, title, bottom rule) so chat UIs do not soft-wrap them into one paragraph. If the banner is missing, the skill did not engage.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 🔭 **SKILL · AUDIT** — code↔doc discovery → backlog
+
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 I sweep the whole codebase against canon, surface every difference, and turn it into a prioritized backlog + work orders. I discover and queue — I do NOT build here (that's `build`/`ship`, dispatched from the backlog). Full methodology: `.samantha/references/coordination-protocol/6-lens-audit.md`.

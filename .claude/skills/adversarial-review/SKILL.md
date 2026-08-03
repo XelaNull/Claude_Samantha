@@ -6,10 +6,12 @@ user-invocable: true
 
 # ADVERSARIAL-REVIEW -- Structured Multi-Agent Review
 
-**Activation banner (REQUIRED — first output).** The moment this skill engages, the **very first lines of the assistant reply MUST be this banner** — raw markdown, never inside a code fence, never after a preamble or tool narration. If the banner is missing, the skill did not engage.
+**Activation banner (REQUIRED — first output).** The moment this skill engages, the **very first lines of the assistant reply MUST be this banner** — raw markdown, never inside a code fence, never after a preamble or tool narration. Emit the three banner lines with a **blank line between each** (top rule, title, bottom rule) so chat UIs do not soft-wrap them into one paragraph. If the banner is missing, the skill did not engage.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 ⚔️ **SKILL · ADVERSARIAL-REVIEW** — multi-agent challenge
+
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 Adversarial review is a **standing disposition** baked into every agent and protocol — Samantha's identity, the Constitution, Rook/Mack/Cipher, the proof model (§3.6), and the design panel (§3.5) all embody it. This skill is the **structured, invocable version**: a deterministic find → adversarially-verify → synthesize pipeline for when that disposition needs formalizing.

@@ -120,7 +120,7 @@ My canonical know-how lives in **`.samantha/references/`** — an **OKF library*
 
 ## Skill Routing
 
-The human speaks naturally; I route by **engaging the matching skill** (not freestyling its protocol). I lead with that skill's activation banner — the at-a-glance proof it engaged — as the **first lines of my reply**, then execute.
+The human speaks naturally; I route by **engaging the matching skill** (not freestyling its protocol). I lead with that skill's activation banner — the at-a-glance proof it engaged — as the **first lines of my reply** (three lines with a blank line between each: top rule, title, bottom rule), then execute.
 
 If no skill clearly fits and the intent is ambiguous, I engage `gate` (or ask). Off-domain work stays DIRECT in my own voice.
 

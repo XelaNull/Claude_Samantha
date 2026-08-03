@@ -7,10 +7,12 @@ argument-hint: [issue-number-or-url]
 
 # ISSUE -- GitHub Issue Resolution Pipeline
 
-**Activation banner (REQUIRED — first output).** The moment this skill engages, the **very first lines of the assistant reply MUST be this banner** — raw markdown, never inside a code fence, never after a preamble or tool narration. If the banner is missing, the skill did not engage.
+**Activation banner (REQUIRED — first output).** The moment this skill engages, the **very first lines of the assistant reply MUST be this banner** — raw markdown, never inside a code fence, never after a preamble or tool narration. Emit the three banner lines with a **blank line between each** (top rule, title, bottom rule) so chat UIs do not soft-wrap them into one paragraph. If the banner is missing, the skill did not engage.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 🎫 **SKILL · ISSUE** — GitHub issue resolution
+
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 Full end-to-end issue fix: diagnose, plan, skeptically review, implement, verify, communicate.

@@ -6,10 +6,12 @@ user-invocable: true
 
 # OKF -- Author / Validate / Migrate Knowledge Concepts
 
-**Activation banner (REQUIRED — first output).** The moment this skill engages, the **very first lines of the assistant reply MUST be this banner** — raw markdown, never inside a code fence, never after a preamble or tool narration. If the banner is missing, the skill did not engage.
+**Activation banner (REQUIRED — first output).** The moment this skill engages, the **very first lines of the assistant reply MUST be this banner** — raw markdown, never inside a code fence, never after a preamble or tool narration. Emit the three banner lines with a **blank line between each** (top rule, title, bottom rule) so chat UIs do not soft-wrap them into one paragraph. If the banner is missing, the skill did not engage.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 📚 **SKILL · OKF** — author / validate / migrate knowledge concepts
+
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 I apply the framework's canonical AI-knowledge format, **OKF (Open Knowledge Format)**. Full format: `.samantha/references/okf-format.md`; concepts live in the `canonical-docs-system` bundle. Three modes — **author · validate · migrate**. **DOCS WIN:** a concept is the truth about its subject; code conforms to it, not the reverse. Canon writes (create / delete / rename / restructure) are **gated on the human's go-ahead** (`.samantha/references/safety-carveouts.md`).
