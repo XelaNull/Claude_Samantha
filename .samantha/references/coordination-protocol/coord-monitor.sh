@@ -42,6 +42,16 @@
 # self-wake path when peers are quiet (pre-fix: implementer heartbeats never reached
 # their own agent).
 #
+# ADDRESSED→PROJECT WAKE FILTER (PROTOCOL 1.3.0): implementer seats
+#   - watch orchestrator.md PLUS same-project impl-*.md (sibling awareness)
+#   - on hub outbox, emit only messages whose TO is ALL, this seat, or same-project
+#   - other-project traffic and hub self-nudge are silent catch-up
+#   - orchestrator watches everything (unchanged)
+# Filter helpers: coord-address-filter.sh. Project from --project, roster project:, or
+# identity impl-<project>[-<lane>].
+#
+# PROTOCOL_VERSION: sourced from PROTOCOL-VERSION beside this script (docs+scripts share stamp).
+#
 # REMOTE CHANNEL (REMOTE-SEATS.md §3.4, 2026-07-18 ratified — hub-only, a SECOND,
 # separate coord-monitor.sh process, never combined with the local channel above):
 #   coord-monitor.sh --identity orchestrator --dir <coorddir> --remote-host <alias> \
@@ -63,15 +73,29 @@
 # every HEARTBEAT-DOWN alert into chat).
 
 set -u
+
+# Resolve pack-dir even when invoked via absolute path / symlink.
+COORD_MONITOR_HOME=$(cd "$(dirname "$0")" && pwd)
+# shellcheck source=coord-address-filter.sh
+. "$COORD_MONITOR_HOME/coord-address-filter.sh"
+# shellcheck source=coord-presence.sh
+. "$COORD_MONITOR_HOME/coord-presence.sh"
+PROTOCOL_VERSION="unknown"
+if [ -f "$COORD_MONITOR_HOME/PROTOCOL-VERSION" ]; then
+  # shellcheck source=PROTOCOL-VERSION
+  . "$COORD_MONITOR_HOME/PROTOCOL-VERSION"
+fi
+
 # F+ (AMEND-PROCESS-HYGIENE-20260726): --help must NEVER claim a seat pidfile.
 # Previously `*) shift;;` swallowed --help and fell through to the default
 # identity=orchestrator pidfile write — Cursor hung --help stole hub watcher.pid.
 for _a in "$@"; do
   case "$_a" in
     -h|--help)
-      printf 'Usage: coord-monitor.sh --identity <id> [--role orchestrator|implementer] --dir <coorddir> [--poll N] [--safety-poll N] [--force-poll]\n'
+      printf 'Usage: coord-monitor.sh --identity <id> [--role orchestrator|implementer] [--project <name>] --dir <coorddir> [--poll N] [--safety-poll N] [--force-poll]\n'
       printf '       coord-monitor.sh --identity <id> --dir <coorddir> --remote-host <alias> --remote-bus-dir <path> [--poll N]\n'
-      printf 'STAR: hub watches all peer outboxes; spoke watches ONLY orchestrator.md.\n'
+      printf 'STAR: hub watches all peers; spoke watches orchestrator.md + same-project impl-*.md.\n'
+      printf 'Spoke hub-outbox filter: TO in {me, ALL, same-project seats}. PROTOCOL %s\n' "$PROTOCOL_VERSION"
       printf 'Persistent STAR inbox monitor. Exits 0 on help WITHOUT writing any pidfile.\n'
       exit 0
       ;;
@@ -79,6 +103,7 @@ for _a in "$@"; do
 done
 IDENT="orchestrator"
 ROLE=""           # orchestrator | implementer — empty ⇒ infer from IDENT
+PROJECT_EXPLICIT=""  # optional --project; else roster project: / identity inference
 DIR="${COORD_DIR:-$PWD/.samantha/coord}"
 POLL=2            # fallback poll interval (used only when fswatch is unavailable, or --force-poll)
 SAFETY_POLL=10    # event-mode slow-poll backstop + heartbeat-check cadence
@@ -89,6 +114,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --identity) IDENT="$2"; shift 2;;
     --role) ROLE="$2"; shift 2;;
+    --project) PROJECT_EXPLICIT="$2"; shift 2;;
     --dir) DIR="$2"; shift 2;;
     --poll) POLL="$2"; shift 2;;
     --safety-poll) SAFETY_POLL="$2"; shift 2;;
@@ -115,6 +141,12 @@ case "$ROLE" in
     exit 2
     ;;
 esac
+
+# Project scope for spoke filter + same-project peer watch (PROTOCOL 1.3.0).
+PROJECT=$(protocol_resolve_project "$IDENT" "$PROJECT_EXPLICIT" "$DIR/$IDENT.md" "$DIR")
+if [ "$ROLE" = "implementer" ] && [ -z "$PROJECT" ]; then
+  printf '┃ coord-monitor: WARN implementer %s has no resolvable project — hub filter falls back to self|ALL only; pass --project or set project: in presence\n' "$IDENT" >&2
+fi
 
 # §3.4: remote channel polls only — no fs-events exist for a different machine.
 # poll >= 2s per spec; clamp rather than silently accept a tighter interval that
@@ -149,6 +181,11 @@ else
   WATCHER_PID_FILE="$DIR/.watch-state/$IDENT/watcher.pid"
 fi
 printf '%s' "$$" > "$WATCHER_PID_FILE"
+presence_ensure_from_mailbox "$DIR" "$IDENT"
+presence_set "$DIR" "$IDENT" "watcher_pid" "$$"
+presence_set "$DIR" "$IDENT" "role" "$ROLE"
+presence_set "$DIR" "$IDENT" "protocol_version" "$PROTOCOL_VERSION"
+[ -n "$PROJECT" ] && presence_set "$DIR" "$IDENT" "project" "$PROJECT"
 
 # ── §3.4 remote channel: a fully separate code path that exits below, before
 #    reaching any local-mode function/variable (watched/emit_new/sweep/fswatch/
@@ -194,7 +231,7 @@ REMOTESCRIPT
   }
 
   remote_emit_new() {
-    local name="$1" cur="$2" of prev
+    local name="$1" cur="$2" of prev chunk filtered
     of=$(remote_offset_file "$name"); prev=$(cat "$of" 2>/dev/null || echo 0)
     [ -z "${cur:-}" ] && return 0
     if [ "$cur" -lt "$prev" ]; then
@@ -203,10 +240,17 @@ REMOTESCRIPT
       printf '%s' "$cur" > "$of"; return 0
     fi
     if [ "$cur" -gt "$prev" ]; then
-      printf '┃ COORD ▼ new message on %s (remote) · %s bytes @ %s\n' "$name" "$((cur - prev))" "$(date -u +%FT%TZ)"
-      ssh -o BatchMode=yes -o ConnectTimeout=10 "$REMOTE_HOST" "tail -c +$((prev + 1)) '$REMOTE_BUS_DIR/$name'" 2>/dev/null
-      printf '┃ COORD ▲ end %s (remote) — re-run coord-status.sh if you acted on a DEPLOY/DECISION\n' "$name"
+      chunk=$(ssh -o BatchMode=yes -o ConnectTimeout=10 "$REMOTE_HOST" "tail -c +$((prev + 1)) '$REMOTE_BUS_DIR/$name'" 2>/dev/null) || chunk=""
       printf '%s' "$cur" > "$of"
+      if [ "$ROLE" = "implementer" ]; then
+        if ! filtered=$(spoke_filter_delta "$IDENT" "$PROJECT" "$chunk"); then
+          return 0
+        fi
+        chunk=$filtered
+      fi
+      printf '┃ COORD ▼ new message on %s (remote) · %s bytes @ %s\n' "$name" "$((cur - prev))" "$(date -u +%FT%TZ)"
+      printf '%s' "$chunk"
+      printf '┃ COORD ▲ end %s (remote) — re-run coord-status.sh if you acted on a DEPLOY/DECISION\n' "$name"
     fi
     return 0
   }
@@ -257,14 +301,24 @@ REMOTESCRIPT
   exit 0
 fi
 
-# Peer files — STAR structural (not conditional):
+# Peer files — STAR + project scope (PROTOCOL 1.3.0):
 #   hub (orchestrator)  → all *.md except own / QUEUE / PROJECTS / queue-* / archives
-#   spoke (implementer) → ONLY orchestrator.md
+#   spoke (implementer) → orchestrator.md + same-project impl-*.md (not self, not other projects)
 watched() {
-  local f b
+  local f b stem p
   if [ "$ROLE" = "implementer" ]; then
     f="$DIR/orchestrator.md"
     [ -e "$f" ] && printf '%s\n' "$f"
+    if [ -n "$PROJECT" ]; then
+      for f in "$DIR"/impl-*.md; do
+        [ -e "$f" ] || continue
+        b=$(basename "$f" .md)
+        [ "$b" = "$IDENT" ] && continue
+        p=$(protocol_project_of_identity "$b")
+        [ "$p" = "$PROJECT" ] || continue
+        printf '%s\n' "$f"
+      done
+    fi
     return 0
   fi
   for f in "$DIR"/*.md; do
@@ -281,7 +335,7 @@ offset_file() { printf '%s/%s.off' "$STATEDIR" "$(basename "$1")"; }
 size_of() { wc -c < "$1" 2>/dev/null | tr -d ' '; }
 
 emit_new() {
-  local f="$1" of cur prev
+  local f="$1" of cur prev chunk filtered
   of=$(offset_file "$f"); cur=$(size_of "$f"); prev=$(cat "$of" 2>/dev/null || echo 0)
   [ -z "${cur:-}" ] && return 0
   if [ "$cur" -lt "$prev" ]; then
@@ -290,17 +344,34 @@ emit_new() {
     printf '%s' "$cur" > "$of"; return 0
   fi
   if [ "$cur" -gt "$prev" ]; then
-    # One tight burst → Monitor batches it into a single notification carrying the whole message.
-    printf '┃ COORD ▼ new message on %s · %s bytes @ %s\n' "$(basename "$f")" "$((cur-prev))" "$(date -u +%FT%TZ)"
-    tail -c "+$((prev+1))" "$f"
-    printf '┃ COORD ▲ end %s — re-run coord-status.sh if you acted on a DEPLOY/DECISION\n' "$(basename "$f")"
+    chunk=$(tail -c "+$((prev+1))" "$f")
+    # Advance offset + Rule-4 receipt BEFORE wake decision — silent catch-up must not
+    # re-deliver on the next sweep (PROTOCOL 1.2.1 addressed wake filter).
     printf '%s' "$cur" > "$of"
     # Advance the pre-commit hook's Rule-4 mailbox receipt too (ratified 2026-07-16, impl
     # PROCESS-NOTE 2026-07-15): streamed-into-chat == delivered == read, matching the retired
     # watcher's behavior — without this, a caught-up implementer gets commit-denied until a
     # manual `wc -c > receipt`. GROWTH PATH ONLY: on shrink/rotation (above) the receipt is
     # deliberately left stale-large so the hook's F6 forces one catch-up read of the new file.
+    # Spoke silent-filter still advances receipt: the bytes were observed; they were not for us.
     printf '%s' "$cur" > "$DIR/.watch-state/$IDENT/$(basename "$f").size"
+
+    if [ "$ROLE" = "implementer" ]; then
+      # Hub outbox: project filter. Same-project peer outboxes: emit whole delta
+      # (watch set already excludes other projects).
+      case "$(basename "$f")" in
+        orchestrator.md)
+          if ! filtered=$(spoke_filter_delta "$IDENT" "$PROJECT" "$chunk"); then
+            return 0
+          fi
+          chunk=$filtered
+          ;;
+      esac
+    fi
+    # One tight burst → Monitor batches it into a single notification carrying the whole message.
+    printf '┃ COORD ▼ new message on %s · %s bytes @ %s\n' "$(basename "$f")" "$((cur-prev))" "$(date -u +%FT%TZ)"
+    printf '%s' "$chunk"
+    printf '┃ COORD ▲ end %s — re-run coord-status.sh if you acted on a DEPLOY/DECISION\n' "$(basename "$f")"
   fi
   return 0
 }
@@ -422,8 +493,8 @@ elif command -v fswatch >/dev/null 2>&1; then
 else
   MODE="poll ${POLL}s (fswatch not on PATH — install it for event-driven receive)"
 fi
-printf '┃ coord-monitor ARMED for %s (role=%s) @ %s — watching: %s · MODE: %s · mutual-monitoring the heartbeat\n' \
-  "$IDENT" "$ROLE" "$(date -u +%FT%TZ)" "$(watched | xargs -n1 basename 2>/dev/null | tr '\n' ' ')" "$MODE"
+printf '┃ coord-monitor ARMED for %s (role=%s project=%s) @ %s — watching: %s · MODE: %s · PROTOCOL %s · mutual-monitoring the heartbeat\n' \
+  "$IDENT" "$ROLE" "${PROJECT:-—}" "$(date -u +%FT%TZ)" "$(watched | xargs -n1 basename 2>/dev/null | tr '\n' ' ')" "$MODE" "$PROTOCOL_VERSION"
 
 if [ "$FORCE_POLL" != 1 ] && command -v fswatch >/dev/null 2>&1; then
   fswatch_loop

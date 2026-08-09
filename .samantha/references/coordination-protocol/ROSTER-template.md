@@ -28,6 +28,9 @@
 schema_version: 1
 identity:      <my-identity>           # stable, derived from cwd/worktree name; never changes mid-session
 role:          orchestrator | implementer
+project:       <project-key>           # REQUIRED for multi-project hubs (e.g. sectorwars, aiclient).
+                                       # Also: --project on scripts, or .presence/<id> project=.
+                                       # Inference: impl-<project> or impl-<project>-<lane> → first segment.
 zone:          <absolute path this instance owns>  # cwd or worktree root; "workspace root" for Orchestrator
 ```
 
@@ -40,12 +43,13 @@ state_updated: <UTC ISO 8601>          # when state last changed; updated by hea
 
 ## Process PIDs (M2 — never pkill -f; kill by recorded PID)
 
-```
-watcher_pid:   <pid>                   # PID of coord-monitor.sh; refresh on session (re)arm / crash recovery
-heartbeat_pid: <pid>                   # PID of heartbeat.sh background process
-```
+Prefer the **presence sidecar** (PROTOCOL 1.3.0): `<coord-dir>/.presence/<identity>` (`watcher_pid=`, `heartbeat_pid=`).
+Mailbox header PID fields below remain readable for older seats but **should not be edited in-place** on the mailbox (size-delta corruption). Scripts write the sidecar on arm.
 
-PID refresh is part of arming: every watcher/heartbeat (re)arm updates these fields in the SAME wake-cycle. Stale PIDs make liveness undiagnosable. (`coord-monitor.sh` is persistent — you do **not** re-arm it after every message.)
+```
+watcher_pid:   <pid>                   # legacy header mirror — prefer .presence/
+heartbeat_pid: <pid>                   # legacy header mirror — prefer .presence/
+```
 
 ## Session Timestamps
 

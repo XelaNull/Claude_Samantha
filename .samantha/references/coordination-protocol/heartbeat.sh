@@ -7,8 +7,8 @@
 #                  [--weak-seat] [--remote-host <alias>] [--remote-bus-dir <path>]
 #
 # PURPOSE:
-#   Runs as a SEPARATE background process from watch-coordination.sh.
-#   Three duties:
+#   Runs as a SEPARATE background process from coord-monitor.sh (the persistent
+#   STAR inbox monitor). Three duties:
 #
 #   1. IDLE-POKE / IDLE-KICK (all instances): if this instance's own file has not been
 #      modified for >= IDLE_THRESHOLD seconds, append a timestamped 💓 HEARTBEAT that
@@ -18,6 +18,10 @@
 #      the *owning* seat actually wakes and starts idle work. (Pre-fix: STAR
 #      no-self-watch meant implementer heartbeats never woke their own agent —
 #      Max had to notice the idle and prompt by hand.)
+#
+#      Hub self-nudge is addressed IDENTITY → IDENTITY so spoke monitors' addressed
+#      wake filter (PROTOCOL 1.2.1) does not wake unrelated implementers on the shared
+#      hub outbox.
 #
 #      WEAK-SEAT GUARD (REMOTE-SEATS.md §8, IDLE-KICK amendment 2, 2026-07-18): a
 #      remote/weak seat's idle policy is MANDATORY-EXPLICIT, never the strong-seat
@@ -49,21 +53,17 @@
 #      folds into the heartbeat wake; the agent must run the M5 6-lens pass.
 #
 #   3. WATCHER DEAD-MAN SWITCH (all instances): each cadence tick, verify the sibling
-#      watch-coordination.sh process is still alive. The heartbeat has no value if the
+#      coord-monitor.sh process is still alive. The heartbeat has no value if the
 #      watcher is dead — and a backgrounded process can only wake its agent session by
 #      terminating. (Human-directed 2026-07-04.)
 #
-#      WHY SUSTAINED, NOT SINGLE-TICK: our watchers are ECHO-AND-TERMINATE — on every
-#      detected delta the watcher prints and EXITS, and the agent session re-arms it
-#      only at the END of its wake-cycle, which can take several minutes. So "watcher.pid
-#      points at a dead process" is the NORMAL state during every active wake-cycle, not
-#      a signal of trouble. v2 tripped on a single failed tick (+20s debounce) and fired
-#      a false positive mid-wake-cycle (watcher down ~2.5 min, session fully alive and
-#      posting) — corrected 2026-07-04 (v2.1). Only SUSTAINED death — dead across
-#      WATCHER_DEAD_TICKS consecutive cadence ticks (~15 min at the default 300s cadence)
-#      — distinguishes a genuinely dormant/dead session from a normal in-progress
-#      wake-cycle. If the watcher is confirmed dead for that many consecutive ticks,
-#      the heartbeat:
+#      WHY SUSTAINED, NOT SINGLE-TICK: under the *retired* echo-and-terminate watcher,
+#      "watcher.pid points at a dead process" was NORMAL mid wake-cycle. That model is
+#      gone — coord-monitor.sh is persistent (armed once per session). Sustained-death
+#      tolerance (WATCHER_DEAD_TICKS consecutive failed ticks, ~15 min at default 300s
+#      cadence) now mainly guards against false alarms from transient `ps` races, not
+#      structurally-expected dead PIDs. If the watcher is confirmed dead for that many
+#      consecutive ticks, the heartbeat:
 #        a. Appends an ADDRESSED "⚠️ WATCHER-DOWN" alert to its own file (addressee:
 #           ALL if this is the orchestrator, else "orchestrator") so the peer's watcher
 #           wakes on it — closing the "unaddressed 💓 absorbed silently" gap.
@@ -105,12 +105,12 @@
 #   --identity <id>                 This instance's stable ID.
 #   --role orchestrator|implementer Role is explicit — do NOT infer from presence file.
 #                                   Inference would race: heartbeat may start before
-#                                   watch-coordination.sh creates the presence file.
+#                                   coord-monitor / the seat writes the presence file.
 #   --dir <coord-dir>               Path to the shared coordination directory.
 #
 # M1 NOTE: The heartbeat's UTC timestamp IS the self-varying element. Each append is unique.
-#          No --seq counter needed. The watcher (watch-coordination.sh) wakes on the append
-#          and delivers the new content (with its unique timestamp) to the agent.
+#          No --seq counter needed. coord-monitor.sh wakes on the append (own-file
+#          IDLE-KICK path for this seat; peers see hub HEARTBEAT but spokes filter it).
 #
 # M2 NOTE: Never pkill -f on a shared machine (kills the peer's loop). To stop:
 #            kill $(cat <coord-dir>/.watch-state/<id>/heartbeat.pid)
@@ -118,9 +118,9 @@
 # M4 NOTE: After every write (PID file + heartbeat appends), read back to confirm
 #          the write persisted. The sandbox filesystem can silently drop writes.
 #
-# WRITE MODEL: <id>.md is append-only after watch-coordination.sh creates it.
+# WRITE MODEL: <id>.md is append-only after the seat creates its presence file.
 #   The heartbeat is the SOLE appender of HEARTBEAT entries via `>>`. No mktemp+mv
-#   needed here — the watcher no longer writes <id>.md content, so there is no
+#   needed here — the monitor does not rewrite <id>.md content, so there is no
 #   concurrent writer to race against. Direct append is safe and simpler.
 #
 # TOOL-BACKGROUND (required):
@@ -154,19 +154,28 @@ WEAK_SEAT=0            # REMOTE-SEATS.md §8 IDLE-KICK amendment 2 (2026-07-18):
                        # orchestrator heartbeat can legitimately pass --remote-host
                        # without being a weak seat itself — conflating the two would
                        # wrongly force the hub's own idle policy to work-request-only.
+SCHEDULE_FILE=""       # PROTOCOL 1.3.0 — optional idle activity schedule
+HB_HOME=$(cd "$(dirname "$0")" 2>/dev/null && pwd)
+PROTOCOL_VERSION="unknown"
+# shellcheck source=PROTOCOL-VERSION
+[[ -f "$HB_HOME/PROTOCOL-VERSION" ]] && . "$HB_HOME/PROTOCOL-VERSION"
+# shellcheck source=coord-presence.sh
+[[ -f "$HB_HOME/coord-presence.sh" ]] && . "$HB_HOME/coord-presence.sh"
 
 # F+: help exits before any pidfile write (pidfile is claimed later).
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help)
       echo "Usage: $0 --identity <id> --role orchestrator|implementer --dir <coord-dir> [options]"
-      echo "Options: --idle-threshold --cadence --idle-policy --hold-check-interval --remote-host --remote-bus-dir --weak-seat"
+      echo "Options: --idle-threshold --cadence --idle-policy --schedule-file --hold-check-interval --remote-host --remote-bus-dir --weak-seat"
+      echo "  --schedule-file <path>   Idle activity schedule (see IDLE-SCHEDULE-template.md)."
+      echo "                           Default probe: <coord-dir>/idle-schedule-<identity>.md"
       echo "  --hold-check-interval <secs>  default 7200 (2h). While a [HOLD:<name>] marker is"
       echo "                                active on this seat's latest substantive outbox header,"
       echo "                                IDLE-KICK is damped and a HOLD-CHECK is posted every"
       echo "                                <secs>; the owning AGENT must ACK it or this heartbeat"
       echo "                                self-terminates with exit 43."
-      echo "Help exits 0 WITHOUT writing heartbeat.pid."
+      echo "PROTOCOL $PROTOCOL_VERSION — Help exits 0 WITHOUT writing heartbeat.pid."
       exit 0
       ;;
     --identity)       IDENTITY="$2";       shift 2 ;;
@@ -175,6 +184,7 @@ while [[ $# -gt 0 ]]; do
     --idle-threshold) IDLE_THRESHOLD="$2"; shift 2 ;;
     --cadence)        CADENCE="$2";        shift 2 ;;
     --idle-policy)    IDLE_POLICY="$2";    shift 2 ;;
+    --schedule-file)  SCHEDULE_FILE="$2";  shift 2 ;;
     --hold-check-interval) HOLD_CHECK_INTERVAL="$2"; shift 2 ;;
     --remote-host)    REMOTE_HOST="$2";    shift 2 ;;
     --remote-bus-dir) REMOTE_BUS_DIR="$2"; shift 2 ;;
@@ -218,6 +228,55 @@ elif [[ -z "$IDLE_POLICY" ]]; then
   fi
 fi
 
+# PROTOCOL 1.3.0 — optional per-seat activity schedule overlays / replaces prose policy body.
+# Explicit --idle-policy still wins as the standing-idle-policy activity text when both exist.
+if [[ -z "$SCHEDULE_FILE" && -f "$COORD_DIR/idle-schedule-$IDENTITY.md" ]]; then
+  SCHEDULE_FILE="$COORD_DIR/idle-schedule-$IDENTITY.md"
+fi
+if [[ -n "$SCHEDULE_FILE" && -f "$SCHEDULE_FILE" ]]; then
+  _sched_body=$(awk -v role="$ROLE" '
+    BEGIN { id=""; when=""; summary=""; in_sum=0 }
+    /^[[:space:]]*- id:[[:space:]]*/ {
+      if (id != "" && keep) {
+        printf "- **%s** (%s): %s\n", id, when, summary
+      }
+      id=$0; sub(/^[[:space:]]*- id:[[:space:]]*/, "", id)
+      when=""; summary=""; keep=0; in_sum=0
+      next
+    }
+    /^[[:space:]]*when:[[:space:]]*/ {
+      when=$0; sub(/^[[:space:]]*when:[[:space:]]*/, "", when)
+      keep=0
+      if (when ~ /^always$/) keep=1
+      if (when ~ ("role=" role)) keep=1
+      if (role == "orchestrator" && when ~ /queue_ready/) keep=1
+      if (role == "implementer" && when ~ /queue_has_unclaimed/) keep=1
+      if (when ~ /hold_active/) keep=1
+      next
+    }
+    /^[[:space:]]*summary:[[:space:]]*>-/ { in_sum=1; summary=""; next }
+    /^[[:space:]]*summary:[[:space:]]*/ {
+      summary=$0; sub(/^[[:space:]]*summary:[[:space:]]*/, "", summary)
+      gsub(/^"/, "", summary); gsub(/"$/, "", summary)
+      in_sum=0; next
+    }
+    in_sum == 1 {
+      line=$0; sub(/^[[:space:]]*/, "", line)
+      if (summary != "") summary=summary " "
+      summary=summary line
+      next
+    }
+    END {
+      if (id != "" && keep) printf "- **%s** (%s): %s\n", id, when, summary
+    }
+  ' "$SCHEDULE_FILE")
+  if [[ -n "$_sched_body" ]]; then
+    IDLE_POLICY=$(printf 'Due idle activities (from %s):\n%s\nStanding fallback: %s' \
+      "$(basename "$SCHEDULE_FILE")" "$_sched_body" "$IDLE_POLICY")
+  fi
+  unset _sched_body
+fi
+
 # CRITICAL: identity charset assertion — IDENTITY is used in file paths and presence-file
 # content that peers read and grep. A metachar or path-separator in the id causes
 # silent mis-behaviour (file not found, grep pattern error, or wrong file written).
@@ -245,14 +304,12 @@ readonly WATCHER_DEAD_TICKS=3    # consecutive failed cadence ticks → trip the
 # Absolute path of this script — used in the re-arm command printed at the cap.
 SCRIPT_ABS="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/$(basename "$0")"
 
-# Absolute path of the sibling watch-coordination.sh — used in the WATCHER-DOWN
-# alert's re-arm instructions. Same directory as this script (both ship together).
-WATCH_SCRIPT_ABS="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/watch-coordination.sh"
+# Absolute path of the sibling coord-monitor.sh — used in WATCHER-DOWN re-arm text.
+# (Legacy name watch-coordination.sh is retired; PID-reuse guard still accepts both.)
+WATCH_SCRIPT_ABS="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/coord-monitor.sh"
 
-# Absolute path of the sibling coord-monitor.sh — the ACTUAL re-arm target for a
-# tripped ALL-CHANNELS alarm on any channel (local or §3.4 remote); watch-coordination.sh
-# is retired and only still named above for pre-cutover installs' PID-reuse guard text.
-MONITOR_SCRIPT_ABS="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/coord-monitor.sh"
+# Same path under the modern name (ALL-CHANNELS re-arm instructions).
+MONITOR_SCRIPT_ABS="$WATCH_SCRIPT_ABS"
 
 
 # Portable rule: remote re-arm hints require an explicit bus dir when --remote-host is set.
@@ -434,10 +491,16 @@ rearm_command_for_channel() {
 }
 
 # ── self-registration: write heartbeat PID (M2, M4) ──────────────────────────
-# PID goes to a dedicated single-writer file — no race with watch-coordination.sh
-# (the watcher writes watcher.pid; we write heartbeat.pid; <id>.md is never rewritten).
+# PID goes to a dedicated single-writer file — no race with coord-monitor.sh
+# (the monitor writes watcher.pid; we write heartbeat.pid; <id>.md is never rewritten).
 
 printf '%s\n' "$$" > "$HEARTBEAT_PID_FILE"
+if declare -F presence_set >/dev/null 2>&1; then
+  presence_ensure_from_mailbox "$COORD_DIR" "$IDENTITY"
+  presence_set "$COORD_DIR" "$IDENTITY" "heartbeat_pid" "$$"
+  presence_set "$COORD_DIR" "$IDENTITY" "role" "$ROLE"
+  presence_set "$COORD_DIR" "$IDENTITY" "protocol_version" "$PROTOCOL_VERSION"
+fi
 
 # M4: confirm PID file persisted.
 if ! grep -q "^$$" "$HEARTBEAT_PID_FILE" 2>/dev/null; then
@@ -445,17 +508,20 @@ if ! grep -q "^$$" "$HEARTBEAT_PID_FILE" 2>/dev/null; then
   # Non-fatal — the heartbeat can still run; M2 kill will not work via the PID file.
 fi
 
-# Verify presence file exists. The watcher (watch-coordination.sh) creates it on arm.
-# Start order: arm watcher FIRST, then arm heartbeat. If the file is missing here,
-# the agent likely armed out of order. Log a warning — append_heartbeat() will also warn.
+# Verify presence file exists. The seat (or bootstrap) creates it before arming.
+# Start order: write presence + arm coord-monitor FIRST, then arm heartbeat.
 if [[ ! -f "$MY_FILE" ]]; then
-  echo "WARN: $MY_FILE does not exist. The watcher should create it first." >&2
-  echo "      Recommended start order: arm watch-coordination.sh, then heartbeat.sh." >&2
+  echo "WARN: $MY_FILE does not exist. Create the presence file / arm the seat first." >&2
+  echo "      Recommended start order: arm coord-monitor.sh, then heartbeat.sh." >&2
 fi
 
 echo "[heartbeat] $IDENTITY (role=$ROLE) armed at $(date -u +"%Y-%m-%dT%H:%M:%SZ")."
 echo "[heartbeat] PID $$ → $HEARTBEAT_PID_FILE"
+echo "[heartbeat] PROTOCOL $PROTOCOL_VERSION"
 echo "[heartbeat] To stop (M2): kill \$(cat $HEARTBEAT_PID_FILE)"
+if [[ -n "$SCHEDULE_FILE" && -f "$SCHEDULE_FILE" ]]; then
+  echo "[heartbeat] Schedule: $SCHEDULE_FILE"
+fi
 echo "[heartbeat] idle-threshold=${IDLE_THRESHOLD}s, cadence=${CADENCE}s, cap=${CAP}s."
 echo "[heartbeat] idle-policy: $IDLE_POLICY"
 echo "[heartbeat] Discover-on-idle: $([ "$ROLE" = "orchestrator" ] && echo "ENABLED (depth floor $DEPTH_FLOOR)" || echo "via IDLE-KICK body (implementer)")"

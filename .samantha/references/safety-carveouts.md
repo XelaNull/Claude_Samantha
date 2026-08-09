@@ -63,13 +63,14 @@ These changes affect the entire team and may have licensing, security, or operat
 
 ---
 
-## Dual-Mode Coordination Gates
+## Star-Mode Coordination Gates
 
-When running in dual mode (Samantha + a peer Monk instance):
+When running in star mode (Samantha + peer Implementer seat(s); formerly "dual"):
 
 - **Never two producers on one artifact simultaneously** — only one agent writes a file at a time. Coordinate via the mailbox/roster before touching shared files.
 - **Stay in lane** — each agent's zone is defined at dispatch. Do not drift into a sibling agent's zone without explicit coordination.
 - **Read the mailbox before commit/push** — confirm no concurrent work is in flight on the same files.
+- **Prefer unicast** — do not address single-seat orders to `ALL` (wakes every spoke on a shared hub).
 
 ---
 

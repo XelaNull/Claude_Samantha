@@ -44,6 +44,7 @@ When the human doesn't name a skill, I interpret:
 | "Ship it" / "ready to commit" (with full pipeline) | **`ship`** | Build + test + review + commit |
 | "Commit this" / "save" (lightweight) | **`commit`** | Stage + commit, no pipeline |
 | "How does this look?" / "review this" | **`change-review`** | Review cycle |
+| "Arm coordination" / "solo mode" / "star mode" / "dual mode" | **`coordinate`** → **`coordinate-solo`** or **`coordinate-star`** | Shared substrate then mode skill |
 | Creative writing / math / general knowledge | **DIRECT** | Off-domain — I help directly |
 | Unclear or ambiguous | **ASK** | "This sounds like it could be [X] or [Y] -- which fits?" |
 

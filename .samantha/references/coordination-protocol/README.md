@@ -1,8 +1,23 @@
 # Coordination Protocol — Orchestrator–Implementer
 
-PROTOCOL-VERSION: 1.2.0
+PROTOCOL-VERSION: 1.3.0
 
-> **Versioning:** bump `PROTOCOL-VERSION` on every ratified amendment.
+> **Versioning:** bump `PROTOCOL-VERSION` (file + this stamp) on every ratified amendment.
+> **Scripts are versioned with the protocol** — `PROTOCOL-VERSION` is sourced by
+> `coord-monitor.sh` / `heartbeat.sh`; arm banners print the stamp. A seat running
+> scripts whose stamp ≠ this README is a defect.
+>
+> **1.3.0** (2026-08-09) — Project-scoped star awareness + skill modes + scheduler + presence sidecar:
+> - **Project wake/watch:** spokes watch `orchestrator.md` + same-project `impl-*.md`;
+>   hub-outbox emit only for TO ∈ {me, ALL, same-project seats}. Other projects silent.
+>   Only orchestrator watches everything. `--project` / roster `project:` / `impl-<project>[-lane]`.
+> - **Skills:** `coordinate` + `coordinate-solo` + `coordinate-star` (dual renamed star).
+> - **Idle schedule:** `IDLE-SCHEDULE-template.md` + `heartbeat --schedule-file`.
+> - **Presence sidecar:** `.presence/<id>` for PIDs/state (Phase 4); mailbox stays message log.
+> - **Multi-orch:** design memo only — `advanced/MULTI-ORCHESTRATOR.md`.
+> - Tests: `tests/run.sh`.
+>
+> **1.2.1** (2026-08-09) — Superseded by 1.3.0 project filter (1.2.1 was identity-only; wrong scope).
 >
 > **1.2.0** (2026-08-03) — Backport of live dual-suite extensions into the portable pack:
 > IDLE-KICK (own-file self-nudge; distinct from orchestrator discover-on-idle) · `--idle-policy` ·
@@ -11,21 +26,21 @@ PROTOCOL-VERSION: 1.2.0
 > no baked host/bus paths). Live deployment overlays (e.g. Nebuspace `.claude/`) may still carry
 > site defaults — do not blind-overwrite them from this pack without a per-file newer check.
 
-The file-based protocol for **dual-mode** operation: Samantha (Orchestrator) coordinating one or more Monk peer instances (Implementers) through shared files when two Claude Code processes must work in parallel.
+The file-based protocol for **star mode** (formerly called dual mode): Samantha (Orchestrator) coordinating one or more Monk peer instances (Implementers) through shared files when two or more agent processes must work in parallel.
 
 ---
 
-## When to use this (Mode B threshold)
+## When to use this (star mode threshold)
 
-Dual mode is **human-initiated** and only warranted when ANY of:
+Star mode is **human-initiated** and only warranted when ANY of:
 1. Work must survive a crash, compaction, or session restart.
 2. A durable, human-auditable work-order trail is required.
 3. The task exceeds one context window and must be partitioned across processes.
 4. Two genuinely concurrent live workstreams a human watches in parallel.
 
-Otherwise: **stay in solo mode** (background subagents via `run_in_background`). Solo dominates within one context budget.
+Otherwise: **stay in solo mode** (background subagents via `run_in_background`). Solo dominates within one context budget. Arm either mode via the `coordinate-solo` / `coordinate-star` skills (shared substrate: `coordinate`).
 
-**Solo installs:** keep this pack as reference documentation only. Do **not** copy or arm the coordination scripts.
+**Solo installs:** keep this pack as reference documentation; arm seat scripts only when a skill (or human) opts into star — or when solo wants a local idle scheduler. Do **not** treat "copy vs don't copy scripts" as the primary install fork.
 
 ---
 
@@ -67,6 +82,21 @@ STAR spokes do not watch their own outbox — a bare heartbeat would never wake 
 - **HOLD-DAMP-V2:** named `[HOLD:…]` damps IDLE-KICK and requires periodic HOLD-CHECK ACKs (observed-incident amendment, 2026-07-29).
 - **`--weak-seat`:** requires explicit `--idle-policy` (no strong-seat audit-and-improve default). See `advanced/REMOTE-SEATS.md`.
 
+### Project-scoped awareness (PROTOCOL 1.3.0)
+
+On a **shared hub**, implementers must see their **own project** (including sibling seats) and must **not** see other projects. Only the orchestrator is aware of everything.
+
+| Seat | Watches | Hub-outbox emit when TO is… |
+|------|---------|------------------------------|
+| Orchestrator | All peer outboxes | (n/a — full traffic) |
+| Implementer project P | `orchestrator.md` + `impl-*` whose project is P (not self) | `ALL`, this seat, or any seat in P |
+
+Project resolution: `--project` → roster/`project:` → `.presence/<id> project=` → identity `impl-<project>[-<lane>]` (first segment after `impl-`). Multi-hyphen project names need an explicit `--project` or `project:` field.
+
+Hub self-nudge (`orchestrator → orchestrator`) does not wake spokes. Prefer unicast within a project; reserve `ALL` for true cross-seat broadcasts (deploy windows).
+
+Smoke tests: `coordination-protocol/tests/run.sh`.
+
 ---
 
 ## Topology — STAR
@@ -90,8 +120,8 @@ STAR spokes do not watch their own outbox — a bare heartbeat would never wake 
 - **Each instance writes only its OWN file** (outbox named by identity).
 - **Orchestrator (hub)** watches ALL files in the coord-dir except its own — auto-discovers new implementers.
 - QUEUE.md is also excluded from the hub's watch-set: it's orchestrator-owned (single-writer, M7), so every change to it is a self-write — watching it caused a phantom rotation wake (ratified 2026-07-03).
-- **Each Implementer (spoke)** watches ONLY the Orchestrator's file (its inbox for orders and decisions).
-- No spoke-to-spoke watching. No self-watching. Self-filter is structural, not conditional.
+- **Each Implementer (spoke)** watches the Orchestrator's file **and** same-project peer outboxes (`impl-<project>*.md`, excluding self). No cross-project spoke watching. No self-watching for peer chatter (own-file IDLE-KICK is the exception via `emit_own_idle_kick`).
+- Hub-outbox delivery to spokes is **project-filtered** (PROTOCOL 1.3.0) — see § Project-scoped awareness.
 - The directory's live contents **are** the roster — dynamic, self-populating, no hand-maintained static list.
 - **Message-log entries:** append-only at true EOF via shell `>>` (or the write-temp-then-rename pattern in MAILBOX-template.md) — never anchor-based Edit. Structured header/roster fields (`watcher_pid`, `heartbeat_pid`, `state`, `last_active`, `queue_depth`) are the opposite: updated in place via Edit, never appended.
 
@@ -431,7 +461,13 @@ Lossless-mandate WOs inherit this proving standard automatically (see WORK-ORDER
 
 | File | Purpose |
 |------|---------|
-| `coord-monitor.sh` | Persistent STAR monitor — local + optional remote ssh channel (`--remote-host` **requires** `--remote-bus-dir`); `--role`; excludes `QUEUE.md` / `PROJECTS.md` / `queue-*.md` / archives; own-file IDLE-KICK nudge (`emit_own_idle_kick`); `--force-poll` for network mounts; portable `DIR=${COORD_DIR:-$PWD/.samantha/coord}` |
+| `PROTOCOL-VERSION` | Single stamp shared by docs + scripts (`PROTOCOL_VERSION=…`) — bump on every amendment |
+| `coord-address-filter.sh` | Project-scope helpers (`spoke_filter_delta`, `protocol_project_of_identity`, …) |
+| `coord-presence.sh` | `.presence/<id>` sidecar read/write (Phase 4) |
+| `IDLE-SCHEDULE-template.md` | Per-seat idle activity schedule for `heartbeat --schedule-file` |
+| `SOLO.md` | Solo protocol stub |
+| `advanced/MULTI-ORCHESTRATOR.md` | Design memo only — multi-hub options |
+| `coord-monitor.sh` | Persistent STAR monitor — project watch/filter (1.3.0); presence sidecar PID write; PROTOCOL stamp on arm |
 | `coord-send.sh` | The publish half of the coordination chat-room — auto-fills timestamp/identity/header, appends atomically to your own outbox, reads the append back to verify it landed; named args `--to`/`--tag`/`--subject`/`--body`/`--body-file` |
 | `coord-status.sh` | Read-only liveness — local (+ remote) watcher pidfiles and heartbeat; ALL-CHANNELS aware; portable coord-dir default |
 | `heartbeat.sh` | IDLE-KICK (`--idle-policy`) + Orchestrator discover-on-idle (folded into IDLE-KICK body) + HOLD-DAMP-V2 + `--weak-seat` + ALL-CHANNELS watcher dead-man (`exit 42`); portable `--dir` |

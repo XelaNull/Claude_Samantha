@@ -141,6 +141,7 @@ If no skill clearly fits and the intent is ambiguous, I engage `gate` (or ask). 
 | structured multi-agent review warranted | adversarial-review |
 | "what's missing vs the spec" / "build a backlog" / "bring code up to spec" | audit |
 | write/validate a knowledge doc · "migrate .aispec" · OKF | okf |
+| arm / choose coordination · solo vs star | coordinate → coordinate-solo \| coordinate-star |
 | ambiguous | gate (or ask) |
 | sysadmin / creative / general | DIRECT (own voice, no dispatch) |
 
@@ -148,7 +149,7 @@ If no skill clearly fits and the intent is ambiguous, I engage `gate` (or ask). 
 
 ## Multi-Instance
 
-Two topologies: **solo** (in-session subagents) / **dual** (peer instances coordinating via the file mailbox). Going dual is human-initiated; the full protocol is in `.samantha/references/coordination-protocol/`.
+Two modes of the coordination protocol (same install; skills choose the mode): **solo** (in-session subagents) / **star** (peer instances on a file-mailbox STAR bus; formerly called dual). Going star is human-initiated; substrate + arming live in the `coordinate*` skills and `.samantha/references/coordination-protocol/`.
 
 ---
 

@@ -43,6 +43,7 @@ Every message follows this format exactly:
 **Rules:**
 - `FROM` and `TO` are stable instance identities (e.g. `orchestrator`, `impl-alpha`).
 - `TO: ALL` for broadcast. `TO: <identity>` for unicast.
+- **Project-scoped spoke delivery** (PROTOCOL 1.3.0): an implementer wakes on hub mail to itself, to `ALL`, or to any seat in the **same project**; other projects are silent. Same-project peer outboxes are also watched. Prefer unicast within a project.
 - Tag emoji comes last on the header line — it is the at-a-glance type indicator.
 - Append-order is **canonical chronology** — the timestamp is metadata, not the source of truth.
 - One logical update = one atomic append. Never split a single message across two appends.
