@@ -79,6 +79,19 @@ if [[ -f "$COORD_RECEIPT_SH" ]]; then
   # shellcheck source=coord-receipt.sh
   . "$COORD_RECEIPT_SH"
 fi
+# PROTOCOL 1.5.0 §3.5 Part D: presence_get (for reading a peer's last-known
+# protocol_version) and this seat's own PROTOCOL_VERSION stamp — see check 1d
+# below (protocol-version MAJOR mismatch gate).
+COORD_PRESENCE_SH="$_HOOK_HOME/coord-presence.sh"
+if [[ -f "$COORD_PRESENCE_SH" ]]; then
+  # shellcheck source=coord-presence.sh
+  . "$COORD_PRESENCE_SH"
+fi
+PROTOCOL_VERSION="unknown"
+if [[ -f "$_HOOK_HOME/PROTOCOL-VERSION" ]]; then
+  # shellcheck source=PROTOCOL-VERSION
+  . "$_HOOK_HOME/PROTOCOL-VERSION"
+fi
 # The tool input arrives as JSON on STDIN under the current Claude Code hook
 # protocol ({"tool_name":...,"tool_input":{"command":...}} or a bare tool_input
 # object). The old CLAUDE_TOOL_INPUT env var is honored as a legacy fallback.
@@ -811,6 +824,273 @@ if [[ -n "$COORD_DIR" ]]; then
     unset _RC_LIVE_WATCHER _rc_wpid _rc_pidfile
   fi
   unset _REMOTE_CHANNELS_FILE _RC_CHECKED_COUNT _RC_CHECKED_SUMMARY
+fi
+
+# ── check 1d: protocol-version MAJOR mismatch gate (PROTOCOL 1.5.0 §3.5 Part D) ──
+#
+# MAJOR = wire/grammar-breaking (a seat on the old MAJOR cannot correctly
+# produce or parse what the new MAJOR expects) — see README.md § Protocol
+# Version Handshake for the full MAJOR/MINOR/PATCH convention. MINOR/PATCH
+# mismatches never block here — they're advisory-only, surfaced by
+# coord-monitor.sh's re-arm-time check and the bootstrap-time exchange (Parts
+# A/B), not this gate.
+#
+# ROUND-9 (2026-08-10, Cipher HIGH — live-demonstrated both directions): this
+# used to source a peer's protocol_version from their .presence sidecar —
+# unsigned, coord-dir-write-level-forgeable state with no ownership
+# enforcement (unlike mailbox files). Anyone with coord-dir write access
+# could forge a peer's presence to (a) fabricate a MAJOR mismatch and
+# hard-block the hub's commits (DoS), or (b) mask a REAL mismatch by
+# matching the hub's own version, defeating the gate entirely. The human's
+# call: a hard block is only as trustworthy as what feeds it — extend
+# SIGNING coverage to this data rather than downgrade to advisory-only.
+#
+# Every seat's routine, already-signed HEARTBEAT append (heartbeat.sh) now
+# embeds PROTOCOL-VERSION in its body. For each enrolled peer this collects
+# EVERY message in their mailbox file, within a bounded recent tail window
+# (not an unbounded full-history rewalk every commit — heartbeats are
+# frequent enough this is sufficient in practice), that (a) carries a
+# PROTOCOL-VERSION field and (b) verifies cleanly against allowed_signers —
+# via coord-verify.sh's OWN engine (never a second, parallel verification
+# path). See ROUND-11 below for why this no longer tries to pick a single
+# "current" claim.
+#
+# ROUND-10 (2026-08-10, Cipher HIGH — round-9's fix moved this hole, did not
+# close it): the original round-9 version extracted (timestamp, version)
+# candidates via a SECOND, INDEPENDENT raw-file awk scan, then only checked
+# that the CANDIDATE'S TIMESTAMP matched some coord-verify.sh "✅ VERIFIED"
+# line — never that the specific PROTOCOL-VERSION line itself sat inside the
+# bytes that were actually signed. Cipher live-demonstrated both directions:
+# `printf >>` unsigned text straight after a real message's own SIG block
+# (same timestamped message, no new `### ` header) was picked up by the raw
+# scan and passed the timestamp match-back, letting unsigned content
+# fabricate a false MAJOR mismatch (DoS) or mask a real one — full defeat,
+# same as before the round-9 rewrite existed. Fix: coord-verify.sh's
+# `--extract-field NAME` (see that script's own header comment) scans ONLY
+# `signed_region` — the EXACT bytes it independently computes and passes to
+# `ssh-keygen -Y verify` for that message — and prints `FIELD-VERIFIED <frm>
+# <ts> <value>` only when found there. There is no longer a second scan of
+# any kind on this side: every value below comes directly from coord-verify.sh
+# parsing its OWN already-verified content, by construction.
+#
+# ROUND-11 (2026-08-10, Cipher HIGH — the THIRD distinct way "which claim is
+# authoritative" was gamed): round-10's version still picked a single
+# "current" claim — the LAST FIELD-VERIFIED line coord-verify.sh printed.
+# coord-verify.sh emits these in PHYSICAL FILE-BYTE-OFFSET order, never by
+# the message's own timestamp. A coord-dir-write-level attacker with ZERO
+# signing key can physically reorder two of a peer's own, genuinely,
+# honestly signed historical HEARTBEATs — no forgery, not one byte inside
+# either message touched, both independently still VERIFIED — and flip
+# which one this logic treated as "most recent," in either direction (mask
+# a real current mismatch by putting the compatible one last, or fabricate
+# a false one by putting a stale incompatible one last). The attack
+# precondition — a peer having 2+ genuinely different historical version
+# claims in the tail window — is not an edge case: it is the literal shape
+# of a genuine version transition, the exact event this gate exists to
+# catch.
+#
+# The human's call: stop trying to determine "most recent" at all — there is
+# no arbitration left to game if there is no arbitration. This now collects
+# EVERY verified PROTOCOL-VERSION claim for a peer in the tail window and
+# blocks if ANY of them has an incompatible MAJOR, full stop, listing every
+# incompatible claim found (not just one) so a human resolving this sees the
+# actual history. Accepted, documented tradeoff (see README.md § Protocol
+# Version Handshake, Part D — same ceiling-statement area as this gate's
+# other accepted limits): immediately after a genuine, deliberate MAJOR
+# transition, the peer's own past incompatible claim can still sit in the
+# tail window until enough newer content ages it out — a brief,
+# self-resolving false-positive block. Deliberately preferred over any
+# scheme that re-introduces a "pick the winner" step: MAJOR bumps are rare
+# (nothing shipped 1.1.0-1.5.0 has ever been one) and deliberate; "briefly
+# noisy right after an expected rare transition" is a categorically safer
+# failure mode than "an attacker with no signing key decides which of a
+# peer's own real, honest claims counts."
+#
+# ROUND-12 (2026-08-10, Cipher HIGH — round-11's fix has its own gap, one
+# layer up): round-11 correctly stopped arbitrating WHICH claim wins, but the
+# tail window feeding that collection was still `coord-verify.sh --tail N` —
+# a RAW LINE COUNT computed before any signature classification. A
+# coord-dir-write-level attacker with ZERO signing key can append any number
+# of unsigned messages SHAPED to match the dead-man-alarm's own documented
+# exemption (c) (tag starting "⚠️ ", body's first line the exact
+# "[SIGNING-FAILED — ...]" sentinel — that exemption checks SHAPE only, never
+# that heartbeat.sh itself produced it or that a real signing failure
+# occurred). Each one is legitimately non-fatal under --strict (working
+# exactly as exemption (c) is meant to) while ALSO counting as raw lines
+# toward --tail's eviction boundary — enough of them pushes a peer's real,
+# currently-true, genuinely signed+verified incompatible PROTOCOL-VERSION
+# claim out of the window entirely, so this check's own claim-collection loop
+# below sees "0 with a verified claim" instead of the real one. One-
+# directional only (can hide a real mismatch, never fabricate a fake one),
+# but that is the single worst-case failure for this gate's entire purpose.
+# Neither check 1b (mailbox-read gate) nor check 1c catch this: the padding
+# can trickle in across many small, individually-unremarkable commits, and
+# once the hub's own receipt tracking advances past it (automatic on any
+# armed watcher's normal wake cycle), the eviction is permanent for this
+# check regardless of how it arrived.
+#
+# Fix: coord-verify.sh's new `--tail-verified N` (see that script's own
+# header comment) computes its window boundary from CLASSIFIED content —
+# the last N message spans that actually verify — never a raw line count.
+# Unsigned padding of any shape, including all three --strict exemption
+# shapes, is skipped "for free" and cannot consume any of the N budget, so
+# it can no longer evict a real VERIFIED claim no matter how much of it an
+# attacker appends. Same structural principle as round-10's fix
+# (--extract-field scoping to signed_region instead of a second raw scan),
+# applied one layer up: to window selection instead of field extraction.
+# `_PV_TAIL_LINES` (a raw line count) is replaced below with
+# `_PV_TAIL_VERIFIED_N` (a VERIFIED-message count) — smaller in absolute
+# terms is fine and expected, since it now only has to count messages that
+# actually verified, not raw lines an attacker could freely inflate.
+#
+# check_peer_protocol_versions (Part B, coord-monitor.sh's advisory re-arm
+# alert) deliberately STAYS presence-sourced — Cipher separately rated that
+# path's forgery risk LOW (informational, cheap, frequent; the human's
+# hard-block decision is what makes signed-sourcing worth its cost here, not
+# every consumer of protocol_version).
+#
+# ROUND-9 (Cipher + Rook, peer enumeration): INBOX_FILES enumerates MAILBOX
+# FILES, not real peers — two independent, non-overlapping ways that
+# diverges from "who is actually enrolled": (1) Cipher — an identity named
+# to match coord_is_seat_outbox_basename's structural-file exclusion (e.g.
+# "queue-evil") evades INBOX_FILES entirely, a genuine MAJOR-divergent peer
+# sails through unnoticed; (2) Rook — a seat mid-archive-rotation (<id>.md
+# just renamed to <id>.archive.md, a normal, documented operation) has live
+# presence/enrollment but no current INBOX_FILES entry, same blind spot with
+# zero malice. The peer set is now derived from allowed_signers (the actual
+# enrolled-identity trust root) — an attacker cannot rename their way out of
+# being enrolled, and archive rotation never changes enrollment.
+if [[ -n "$COORD_DIR" && -n "$MY_ID" && -f "$COORD_VERIFY_SH" ]]; then
+  # ROUND-12: a VERIFIED-message count, not a raw line count — several
+  # signed HEARTBEAT cycles' worth, generous but immune to unsigned padding
+  # of any shape (see ROUND-12 comment above _PV_TAIL_LINES's old use).
+  _PV_TAIL_VERIFIED_N=50
+  _PV_CHECKED=0
+  _PV_KNOWN=0
+  _PV_SELF_UNKNOWN=0
+  # ROUND-9 (Rook — "fix this first, most dangerous in practice"): a
+  # partial/incomplete framework copy (PROTOCOL-VERSION file missing beside
+  # this hook) leaves PROTOCOL_VERSION at the "unknown" default from the
+  # sourcing block near the top of this file. The peer-side guard below
+  # already refuses to compare against an unknown PEER version; this guards
+  # the SELF side the same way — skip the whole check with a loud WARN
+  # rather than hard-blocking every peer, every commit, forever, on not
+  # knowing our own version. Never fail on absence-of-data alone.
+  [[ "$PROTOCOL_VERSION" == "unknown" || -z "$PROTOCOL_VERSION" ]] && _PV_SELF_UNKNOWN=1
+
+  if [[ "$_PV_SELF_UNKNOWN" = 1 ]]; then
+    echo "WARN [protocol-version]: this seat's own PROTOCOL_VERSION is unknown (PROTOCOL-VERSION file missing beside this hook — partial/incomplete framework copy?) — skipping the protocol-version gate rather than false-blocking every peer." >&2
+  else
+    MY_PV_MAJOR="${PROTOCOL_VERSION%%.*}"
+    if [[ -f "$COORD_DIR/allowed_signers" ]]; then
+      while IFS= read -r _pv_peer; do
+        [[ -z "$_pv_peer" || "$_pv_peer" == \#* || "$_pv_peer" == "$MY_ID" ]] && continue
+        _PV_CHECKED=$((_PV_CHECKED + 1))
+        # ROUND-9 (Rook — archive-rotation lifecycle): a seat mid-rotation
+        # (<id>.md renamed to <id>.archive.md, coord_is_seat_outbox_basename's
+        # documented, ordinary lifecycle — see coord-address-filter.sh:86-92)
+        # stays enrolled and is therefore still counted in _PV_CHECKED below
+        # (the old INBOX_FILES-based enumeration made them silently invisible
+        # instead). Deliberately NOT also scanning <peer>.archive.md for a
+        # claim: coord-verify.sh's structural FROM==basename(file) check (see
+        # coord-verify.sh:60-89) is a hardened anti-splice control that always
+        # rejects archive-file content by design — every message inside says
+        # FROM=<peer> but the archive's own basename is "<peer>.archive", so
+        # it can never verify there. Loosening that check for this one caller
+        # would reopen the exact cross-mailbox splice attack it exists to
+        # prevent, for a rotation case that already degrades safely: an
+        # archived peer with no live claim simply falls into the same
+        # never-hard-block-on-absence path as a brand-new peer, but is now
+        # honestly named in the INFO line below instead of dropped silently.
+        _pv_peer_file="$COORD_DIR/$_pv_peer.md"
+        _pv_claims=""
+        if [[ -f "$_pv_peer_file" ]]; then
+          # coord-verify.sh exits non-zero whenever the file contains ANY
+          # invalid message — not just a protocol-version-shaped one. Under
+          # this hook's own `set -euo pipefail`, a bare `var=$(...)`
+          # assignment with no `|| ` guard would abort the ENTIRE hook script
+          # right here on ANY tampered message anywhere in a peer's file,
+          # short-circuiting checks 1c/2's own proper FAIL-with-exit-2
+          # reporting for it (round-9 regression, caught by this pack's own
+          # full test suite — see notebook memory
+          # feedback_set_e_command_substitution_guard.md). Safe to swallow
+          # here ONLY because this check only ever consumes stdout below,
+          # never branches on the exit code, AND because check 1b already
+          # fails closed ahead of this point if ssh-keygen/python3/
+          # coord-verify.sh itself is genuinely missing (the `-f
+          # "$COORD_VERIFY_SH"` guard at this block's own top) — if that
+          # posture in check 1b ever changes, this `|| true` needs revisiting
+          # alongside it.
+          _pv_verify_out=$(bash "$COORD_VERIFY_SH" --dir "$COORD_DIR" --file "$_pv_peer_file" --tail-verified "$_PV_TAIL_VERIFIED_N" --extract-field PROTOCOL-VERSION 2>/dev/null) || true
+          # ROUND-11 (2026-08-10, Cipher HIGH — the third hole in this same
+          # gate): coord-verify.sh emits FIELD-VERIFIED lines in PHYSICAL
+          # FILE-BYTE-OFFSET order, never by the message's own timestamp. A
+          # coord-dir-write-level attacker with ZERO signing key can
+          # physically reorder two of a peer's own, genuinely, honestly
+          # signed historical HEARTBEATs — no forgery, not one byte inside
+          # either message touched, both still independently VERIFIED — and
+          # flip which claim a "pick the most recent one" rule would treat
+          # as authoritative, in either direction (mask a real current
+          # mismatch, or fabricate a false one from stale history). This is
+          # the THIRD distinct way "which claim wins" has been gamed
+          # (unsigned presence in round 8, an unscoped byte range in round
+          # 9, file order in round 10) — the human's call (round-11): stop
+          # trying to determine "most recent" at all. Collect EVERY
+          # FIELD-VERIFIED claim in the tail window below and block on ANY
+          # of them being MAJOR-incompatible, full stop. There is no
+          # "winner" left to game.
+          _pv_claims=$(printf '%s\n' "$_pv_verify_out" | awk -v peer="$_pv_peer" '$1=="FIELD-VERIFIED" && $2==peer { v=$4; for (i=5;i<=NF;i++) v=v" "$i; print $3"|"v }')
+        fi
+        if [[ -z "$_pv_claims" ]]; then
+          echo "INFO [protocol-version]: no verified PROTOCOL-VERSION claim found for '$_pv_peer' within the last $_PV_TAIL_VERIFIED_N verified message(s) of $_pv_peer_file — skipping (new peer, archived/rotated seat, pre-1.5.0 history, or nothing verified yet). Never hard-blocking on absent data."
+          continue
+        fi
+        _PV_KNOWN=$((_PV_KNOWN + 1))
+        _pv_incompatible=()
+        while IFS= read -r _pv_claim; do
+          _pv_cts="${_pv_claim%%|*}"
+          _pv_cver="${_pv_claim#*|}"
+          _pv_cmajor="${_pv_cver%%.*}"
+          [[ -n "$_pv_cmajor" && "$_pv_cmajor" != "$MY_PV_MAJOR" ]] && _pv_incompatible+=("$_pv_cver (MAJOR $_pv_cmajor) at $_pv_cts")
+        done <<< "$_pv_claims"
+        if [[ ${#_pv_incompatible[@]} -gt 0 ]]; then
+          echo ""
+          echo "FAIL [protocol-version]: $_pv_peer has ${#_pv_incompatible[@]} signed+verified PROTOCOL-VERSION claim(s) incompatible with this seat's own PROTOCOL $PROTOCOL_VERSION (MAJOR $MY_PV_MAJOR):"
+          for _pv_inc in "${_pv_incompatible[@]}"; do
+            echo "  - $_pv_inc"
+          done
+          echo "A MAJOR difference means one side cannot correctly produce or parse what the other expects (wire/grammar-breaking) — this is not friction to route around."
+          echo "Upgrade the stale side to a matching MAJOR version before committing further. See README.md § Message Authenticity, Protocol Version Handshake."
+          echo "If this peer genuinely already transitioned and only a stale historical claim is triggering this: this is expected, self-resolving noise — it clears once enough newer content pushes the old claim past the tail window (see README's ceiling note for this check)."
+          FAIL=1
+        fi
+      # ROUND-10 (Rook): split the principal field on commas before printing
+      # — every tool-written line (coord-keygen.sh) is always one bare
+      # identity, but ssh's own allowed_signers format permits a
+      # comma-separated principal list, which a hand-edited line could use.
+      # A bare `{ print $1 }` would treat "alice,bob" as one literal
+      # (phantom, non-matching) peer and silently enumerate neither real
+      # identity.
+      done < <(awk '!/^#/ && NF { n = split($1, a, ","); for (i = 1; i <= n; i++) print a[i] }' "$COORD_DIR/allowed_signers" 2>/dev/null | sort -u)
+    fi
+  fi
+
+  echo ""
+  if [[ "$_PV_SELF_UNKNOWN" = 1 ]]; then
+    echo "INFO [protocol-version]: skipped — this seat's own PROTOCOL_VERSION is unknown, see WARN above."
+  else
+    echo "INFO [protocol-version]: checked $_PV_CHECKED enrolled peer(s), $_PV_KNOWN with a verified PROTOCOL-VERSION claim (self: $PROTOCOL_VERSION, MAJOR ${MY_PV_MAJOR:-?})."
+  fi
+  unset _PV_TAIL_VERIFIED_N _PV_CHECKED _PV_KNOWN _PV_SELF_UNKNOWN MY_PV_MAJOR _pv_peer _pv_peer_file _pv_verify_out _pv_claims _pv_incompatible _pv_claim _pv_cts _pv_cver _pv_cmajor _pv_inc
+elif [[ -n "$COORD_DIR" && -n "$MY_ID" ]]; then
+  # ROUND-10 (Rook): the guard above stays silent when coord-verify.sh
+  # itself is missing — same "one missing helper, no stated posture"
+  # pattern this file already learned to avoid at round 5-6's other sites.
+  # Absence-of-tooling is not a security gap here the way an absent
+  # allowed_signers or a failed remote fetch would be (nothing to hard-block
+  # ON without it), but it should never be silent either.
+  echo ""
+  echo "INFO [protocol-version]: skipping — coord-verify.sh not found at $COORD_VERIFY_SH (partial/incomplete framework copy?)."
 fi
 
 # ── check 2: Rule 1 advisory — dangerous staging verb ────────────────────────

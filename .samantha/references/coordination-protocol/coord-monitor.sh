@@ -590,6 +590,93 @@ for f in $(watched); do printf '%s' "$(size_of "$f")" > "$(offset_file "$f")"; d
 OWN_FILE="$DIR/$IDENT.md"
 [ -f "$OWN_FILE" ] && printf '%s' "$(size_of "$OWN_FILE")" > "$(offset_file "$OWN_FILE")"
 
+# ── PROTOCOL 1.5.0 §3.5 Part B: re-arm-time protocol-version staleness check
+#    (human's explicit "pointer, not push" design — see coord-presence.sh's
+#    protocol_mismatch_message for the shared wording and its own header for
+#    why this is a pointer, never a payload) ─────────────────────────────────
+#
+# Bootstrap-time exchange (Part A, README § Identity Bootstrap) only ever
+# fires ONCE, at first contact — it never re-fires for a seat that already
+# bootstrapped and simply forgot to upgrade before its next restart. THIS is
+# the check that actually catches that case: on every LOCAL-channel arm,
+# after this seat's own protocol_version write above, walk the SAME peer
+# roster watched() already uses for message delivery (no second enumeration
+# to drift from it — team-lead's explicit instruction: follow the existing
+# convention, don't invent a new one) and compare each peer's last-known
+# presence protocol_version to this seat's own.
+#
+# Scoped to the LOCAL channel only, deliberately: a remote seat's presence
+# lives on a different host and is not reachable via a local presence_get()
+# call — extending this to the remote channel would mean re-opening the
+# already-shipped, already-hardened 1.4.0 remote-seat extension, explicitly
+# out of scope for this round.
+#
+# Dedup follows the SAME "state file gates the alert" shape as
+# remote_presence_check's SEAT STALE check below (one state file per peer,
+# cleared the moment the condition resolves) rather than reinventing a
+# parallel mechanism: one state file per peer records the
+# (their-version:my-version) pair already alerted on — re-arming while the
+# SAME mismatch persists does not re-post, a NEW mismatch (either side's
+# version changes) does, and the file is removed the moment versions agree
+# again so a genuinely new future mismatch alerts normally.
+protocol_version_state_file() { printf '%s/protocol-version.%s.state' "$STATEDIR" "$1"; }
+
+check_peer_protocol_versions() {
+  local f b their_ver sf already send_err
+  command -v protocol_mismatch_message >/dev/null 2>&1 || return 0
+  # ROUND-9 (Rook — self-side unknown-version guard, mirroring
+  # coordination-precommit-hook.sh's _PV_SELF_UNKNOWN): a partial/incomplete
+  # framework copy (PROTOCOL-VERSION file missing beside this monitor) leaves
+  # PROTOCOL_VERSION at its "unknown" default (line ~115 above). Without this
+  # guard every peer with a real known version would compare unequal to the
+  # literal string "unknown" and alert every re-arm, forever — never
+  # hard-alert on not knowing our OWN version.
+  if [ "$PROTOCOL_VERSION" = "unknown" ] || [ -z "${PROTOCOL_VERSION:-}" ]; then
+    printf '┃ coord-monitor ⚠️ this seat'"'"'s own PROTOCOL_VERSION is unknown (PROTOCOL-VERSION file missing?) — skipping protocol-version peer checks.\n' >&2
+    return 0
+  fi
+  for f in $(watched); do
+    b=$(basename "$f" .md)
+    their_ver=$(presence_get "$DIR" "$b" "protocol_version" 2>/dev/null) || true
+    sf=$(protocol_version_state_file "$b")
+    if [ -z "${their_ver:-}" ] || [ "$their_ver" = "$PROTOCOL_VERSION" ]; then
+      # No known version yet (peer hasn't armed since upgrading to a
+      # version that writes this field), or already matches — nothing to
+      # alert, and any prior alert for this peer is now resolved.
+      rm -f "$sf" 2>/dev/null || true
+      continue
+    fi
+    already=$(cat "$sf" 2>/dev/null || true)
+    [ "$already" = "${their_ver}:${PROTOCOL_VERSION}" ] && continue
+    if [ -x "$COORD_MONITOR_HOME/coord-send.sh" ]; then
+      # ROUND-9 (item 8, consistency): --body "$(...)" double-quote-expands
+      # in THIS calling shell, silently dropping any backtick span before
+      # coord-send.sh ever sees it (coord-send.sh's own USED_BODY_ARG
+      # warning documents the same fragility). protocol_mismatch_message's
+      # output happens to contain no backticks today, but piped stdin via
+      # `--body -` is the documented safe idiom (coord-send.sh:32) and costs
+      # nothing here, so use it for consistency rather than relying on that
+      # coincidence continuing to hold.
+      # ROUND-9 (item 2): the "posted" message and the dedup state-file
+      # write must only happen on an ACTUAL coord-send.sh success — both
+      # used to run unconditionally after the call regardless of its exit
+      # status, and 2>&1 was discarding the real failure reason instead of
+      # surfacing it.
+      send_err=$(protocol_mismatch_message "$IDENT" "$PROTOCOL_VERSION" "$b" "$their_ver" | \
+        "$COORD_MONITOR_HOME/coord-send.sh" --identity "$IDENT" --dir "$DIR" --to "$b" \
+          --tag "⚠️ PROTOCOL-VERSION-MISMATCH" --body - 2>&1 >/dev/null)
+      if [ $? -eq 0 ]; then
+        printf '┃ coord-monitor ⚠️ PROTOCOL-VERSION mismatch — %s is on %s, this seat is on %s. Alert posted to %s.\n' \
+          "$b" "$their_ver" "$PROTOCOL_VERSION" "$(basename "$OWN_FILE")"
+        printf '%s' "${their_ver}:${PROTOCOL_VERSION}" > "$sf"
+      else
+        printf '┃ coord-monitor ⚠️ could not post PROTOCOL-VERSION-MISMATCH alert to %s — coord-send.sh failed: %s\n' "$b" "$send_err" >&2
+      fi
+    fi
+  done
+}
+check_peer_protocol_versions
+
 # sweep: peer deltas + own-file idle-kick filter.
 sweep() {
   local f

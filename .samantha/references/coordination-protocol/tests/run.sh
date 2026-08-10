@@ -6,6 +6,8 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 . "$ROOT/coord-address-filter.sh"
 # shellcheck source=../coord-receipt.sh
 . "$ROOT/coord-receipt.sh"
+# shellcheck source=../coord-presence.sh
+. "$ROOT/coord-presence.sh"
 # shellcheck source=../PROTOCOL-VERSION
 . "$ROOT/PROTOCOL-VERSION"
 
@@ -36,7 +38,28 @@ assert_not_contains() {
   esac
 }
 
-assert_eq "protocol-version-file" "$PROTOCOL_VERSION" "1.4.0"
+assert_eq "protocol-version-file" "$PROTOCOL_VERSION" "1.5.0"
+
+# PROTOCOL 1.5.0 §3.5 Part C/D: shared Protocol Version Handshake helpers
+# (coord-presence.sh) — direct unit coverage of the predicate + message
+# composer both coord-monitor.sh's Part B alert and README's documented
+# Part A wording depend on.
+assert_eq "protocol-version-major-simple" "$(protocol_version_major 1.5.0)" "1"
+assert_eq "protocol-version-major-double-digit" "$(protocol_version_major 12.3.4)" "12"
+assert_eq "protocol-mismatch-severity-minor" "$(protocol_mismatch_severity 1.5.0 1.4.0)" "MINOR/PATCH"
+assert_eq "protocol-mismatch-severity-major" "$(protocol_mismatch_severity 1.5.0 2.0.0)" "MAJOR"
+assert_eq "protocol-mismatch-severity-equal" "$(protocol_mismatch_severity 1.5.0 1.5.0)" "MINOR/PATCH"
+PMM_OUT=$(protocol_mismatch_message orchestrator 1.5.0 impl-alpha 1.4.0)
+assert_contains "protocol-mismatch-message-names-both-versions" "$PMM_OUT" "impl-alpha is running 1.4.0; orchestrator is running 1.5.0"
+assert_contains "protocol-mismatch-message-minor-severity" "$PMM_OUT" "MINOR/PATCH"
+assert_contains "protocol-mismatch-message-local-remediation-default" "$PMM_OUT" "git pull the coordination-protocol"
+assert_not_contains "protocol-mismatch-message-no-canonical-source-value-when-unset" "$PMM_OUT" "the canonical framework lives at:"
+PMM_MAJOR_OUT=$(protocol_mismatch_message orchestrator 1.5.0 impl-alpha 2.0.0)
+assert_contains "protocol-mismatch-message-major-severity" "$PMM_MAJOR_OUT" "MAJOR — wire/grammar-breaking"
+PMM_CANON_OUT=$(COORD_CANONICAL_SOURCE="git@example.com:org/fw.git" protocol_mismatch_message orchestrator 1.5.0 impl-alpha 1.4.0)
+assert_contains "protocol-mismatch-message-honors-canonical-source" "$PMM_CANON_OUT" "git@example.com:org/fw.git"
+assert_contains "protocol-mismatch-message-never-a-payload" "$PMM_CANON_OUT" "not a payload"
+
 assert_eq "project-of-impl-sectorwars" "$(protocol_project_of_identity impl-sectorwars)" "sectorwars"
 assert_eq "project-of-impl-sectorwars-ui" "$(protocol_project_of_identity impl-sectorwars-ui)" "sectorwars"
 assert_eq "project-of-impl-aiclient" "$(protocol_project_of_identity impl-aiclient)" "aiclient"
@@ -226,6 +249,11 @@ EOF
   PROV_ID=$("$ROOT/bootstrap-identity.sh" --provision --dir "$SIGD" --zone "$TMP" 2>/dev/null)
   PUBLINE=$(grep '^pubkey:' "$SIGD/$PROV_ID.md" | sed 's/^pubkey: //')
   assert_contains "sig-provision-embeds-pubkey" "$PUBLINE" "ssh-ed25519"
+  # PROTOCOL 1.5.0 §3.5 Part A: the HEADS-UP announces the newborn's own
+  # PROTOCOL-VERSION alongside the pubkey — same carrier, no new message
+  # type. Announce-only (no comparison possible yet — the newborn can't
+  # know the hub's version before first contact).
+  assert_contains "sig-provision-embeds-protocol-version" "$(cat "$SIGD/$PROV_ID.md")" "PROTOCOL-VERSION: $PROTOCOL_VERSION"
   "$ROOT/coord-keygen.sh" --enroll --identity impl-sigtest --pubkey-line "$PUBLINE" --dir "$SIGD" >/dev/null
 
   # (0b) item 14, 2026-08-09: --adopt validates PROVISIONAL's charset too, not
@@ -1582,6 +1610,781 @@ EOF
   else
     echo "SKIP [remote-seat sig] ssh not found."
   fi
+
+  # ── PROTOCOL 1.5.0 §3.5: Protocol Version Handshake ─────────────────────────
+  # These need ssh-keygen (real coord-send.sh signing) but NOT the `ssh` binary
+  # — Part B's alert is a LOCAL-channel post, Part D's gate is a pure local
+  # presence read. Deliberately outside the inner "ssh found" gate above.
+
+  # (16) PROTOCOL 1.5.0 Part B: coord-monitor.sh's re-arm-time staleness
+  # check. Fresh hub + one peer whose presence already claims an OLDER
+  # version than this seat's own — proves the mismatch is detected on arm
+  # and a signed, addressed alert lands in the detecting seat's OWN outbox
+  # (STAR addressing — the peer's own monitor watches that file), not just
+  # local stdout.
+  PV_D="$TMP/pv-hub"
+  mkdir -p "$PV_D"
+  : > "$PV_D/orchestrator.md"
+  : > "$PV_D/impl-alpha.md"
+  PV_OLINE=$("$ROOT/coord-keygen.sh" --generate --identity orchestrator --dir "$PV_D" 2>/dev/null)
+  "$ROOT/coord-keygen.sh" --enroll --identity orchestrator --pubkey-line "$PV_OLINE" --dir "$PV_D" >/dev/null
+  PV_ALINE=$("$ROOT/coord-keygen.sh" --generate --identity impl-alpha --dir "$PV_D" 2>/dev/null)
+  "$ROOT/coord-keygen.sh" --enroll --identity impl-alpha --pubkey-line "$PV_ALINE" --dir "$PV_D" >/dev/null
+  mkdir -p "$PV_D/.presence"
+  printf 'identity=impl-alpha\nprotocol_version=1.3.0\n' > "$PV_D/.presence/impl-alpha"
+
+  PV_MON_OUT="$TMP/pv-monitor.out"
+  : > "$PV_MON_OUT"
+  "$ROOT/coord-monitor.sh" --identity orchestrator --dir "$PV_D" --poll 1 > "$PV_MON_OUT" 2>&1 &
+  PV_MON_PID=$!
+  wait_for_grep "$PV_MON_OUT" "ARMED for orchestrator" 25 || true
+  sleep 1
+  kill "$PV_MON_PID" 2>/dev/null || true
+  wait "$PV_MON_PID" 2>/dev/null || true
+
+  PV_OUTBOX=$(cat "$PV_D/orchestrator.md" 2>/dev/null || true)
+  assert_contains "protocol-version-mismatch-alert-posted-header" "$PV_OUTBOX" "orchestrator → impl-alpha — ⚠️ PROTOCOL-VERSION-MISMATCH"
+  assert_contains "protocol-version-mismatch-alert-names-versions" "$PV_OUTBOX" "impl-alpha is running 1.3.0; orchestrator is running $PROTOCOL_VERSION"
+  assert_contains "protocol-version-mismatch-alert-is-signed" "$PV_OUTBOX" "BEGIN SSH SIGNATURE"
+
+  # (16b) Dedup: re-arming while the SAME mismatch persists must NOT re-post
+  # — one state file per peer gates it, same shape as SEAT STALE's wasstale.
+  PV_MON_OUT2="$TMP/pv-monitor2.out"
+  : > "$PV_MON_OUT2"
+  "$ROOT/coord-monitor.sh" --identity orchestrator --dir "$PV_D" --poll 1 > "$PV_MON_OUT2" 2>&1 &
+  PV_MON_PID2=$!
+  wait_for_grep "$PV_MON_OUT2" "ARMED for orchestrator" 25 || true
+  sleep 1
+  kill "$PV_MON_PID2" 2>/dev/null || true
+  wait "$PV_MON_PID2" 2>/dev/null || true
+  PV_ALERT_COUNT=$(grep -c "PROTOCOL-VERSION-MISMATCH" "$PV_D/orchestrator.md" 2>/dev/null || echo 0)
+  assert_eq "protocol-version-mismatch-dedup-no-repeat-alert" "$PV_ALERT_COUNT" "1"
+
+  # (16c) Resolve (peer catches up to this seat's version), re-arm — state
+  # clears; THEN a genuinely NEW mismatch (peer moves past this seat) must
+  # alert again, proving dedup doesn't permanently latch.
+  printf 'identity=impl-alpha\nprotocol_version=%s\n' "$PROTOCOL_VERSION" > "$PV_D/.presence/impl-alpha"
+  PV_MON_OUT3="$TMP/pv-monitor3.out"
+  : > "$PV_MON_OUT3"
+  "$ROOT/coord-monitor.sh" --identity orchestrator --dir "$PV_D" --poll 1 > "$PV_MON_OUT3" 2>&1 &
+  PV_MON_PID3=$!
+  wait_for_grep "$PV_MON_OUT3" "ARMED for orchestrator" 25 || true
+  sleep 1
+  kill "$PV_MON_PID3" 2>/dev/null || true
+  wait "$PV_MON_PID3" 2>/dev/null || true
+  PV_STATE_COUNT=$(find "$PV_D/.watch-state" -name "protocol-version.*" 2>/dev/null | wc -l | tr -d ' ')
+  assert_eq "protocol-version-mismatch-clears-on-resolve" "$PV_STATE_COUNT" "0"
+
+  printf 'identity=impl-alpha\nprotocol_version=9.9.9\n' > "$PV_D/.presence/impl-alpha"
+  PV_MON_OUT4="$TMP/pv-monitor4.out"
+  : > "$PV_MON_OUT4"
+  "$ROOT/coord-monitor.sh" --identity orchestrator --dir "$PV_D" --poll 1 > "$PV_MON_OUT4" 2>&1 &
+  PV_MON_PID4=$!
+  wait_for_grep "$PV_MON_OUT4" "ARMED for orchestrator" 25 || true
+  sleep 1
+  kill "$PV_MON_PID4" 2>/dev/null || true
+  wait "$PV_MON_PID4" 2>/dev/null || true
+  PV_ALERT_COUNT2=$(grep -c "PROTOCOL-VERSION-MISMATCH" "$PV_D/orchestrator.md" 2>/dev/null || echo 0)
+  assert_eq "protocol-version-mismatch-new-mismatch-alerts-again" "$PV_ALERT_COUNT2" "2"
+
+  # (17) PROTOCOL 1.5.0 Part D: coordination-precommit-hook.sh's MAJOR
+  # mismatch gate. ROUND-9 (2026-08-10, Cipher HIGH): rewritten from a
+  # presence-sourced fixture to a REAL SIGNED HEARTBEAT fixture — check 1d no
+  # longer reads .presence at all (see coordination-precommit-hook.sh's check
+  # 1d header comment), so a presence-only fixture would no longer exercise
+  # the real code path. pvd_arm_signed_heartbeat below stands up a real
+  # heartbeat.sh run under an overridden PROTOCOL-VERSION so the resulting
+  # HEARTBEAT append is genuinely signed+verifiable at a chosen version.
+  pvd_arm_signed_heartbeat() {
+    # <coord-dir> <identity> <protocol-version>
+    local d="$1" ident="$2" ver="$3" home
+    home="$TMP/pvd-hb-home-$ident-$ver"
+    mkdir -p "$home"
+    cp "$ROOT/heartbeat.sh" "$ROOT/coord-keygen.sh" "$ROOT/coord-presence.sh" "$home/"
+    printf 'PROTOCOL_VERSION=%s\n' "$ver" > "$home/PROTOCOL-VERSION"
+    mkdir -p "$d/.watch-state/$ident"
+    ( sleep 30 & echo $! > "$d/.watch-state/$ident/watcher.pid" ) &
+    wait
+    local hb_out="$TMP/pvd-hb-$ident-$ver.out"
+    "$home/heartbeat.sh" --identity "$ident" --role implementer --dir "$d" \
+      --idle-threshold 0 --cadence 1 --idle-policy "test policy" \
+      > "$hb_out" 2>&1 &
+    local hb_pid=$!
+    wait_for_grep "$hb_out" "signed." 25 || true
+    kill "$hb_pid" 2>/dev/null || true
+    wait "$hb_pid" 2>/dev/null || true
+  }
+
+  PVD_D="$TMP/pvd-hub"
+  mkdir -p "$PVD_D"
+  : > "$PVD_D/orchestrator.md"
+  : > "$PVD_D/impl-alpha.md"
+  PVD_OLINE=$("$ROOT/coord-keygen.sh" --generate --identity orchestrator --dir "$PVD_D" 2>/dev/null)
+  "$ROOT/coord-keygen.sh" --enroll --identity orchestrator --pubkey-line "$PVD_OLINE" --dir "$PVD_D" >/dev/null
+  PVD_ALINE=$("$ROOT/coord-keygen.sh" --generate --identity impl-alpha --dir "$PVD_D" 2>/dev/null)
+  "$ROOT/coord-keygen.sh" --enroll --identity impl-alpha --pubkey-line "$PVD_ALINE" --dir "$PVD_D" >/dev/null
+  pvd_arm_signed_heartbeat "$PVD_D" impl-alpha "2.0.0"
+  PVD_MAJOR_RC=0
+  PVD_MAJOR_OUT=$("$ROOT/coordination-precommit-hook.sh" "$PVD_D" "orchestrator" < /dev/null 2>&1) || PVD_MAJOR_RC=$?
+  assert_eq "hook-protocol-version-major-mismatch-blocks-rc" "$PVD_MAJOR_RC" "2"
+  assert_contains "hook-protocol-version-major-mismatch-message" "$PVD_MAJOR_OUT" "FAIL [protocol-version]: impl-alpha has 1 signed+verified PROTOCOL-VERSION claim(s) incompatible with this seat's own PROTOCOL $PROTOCOL_VERSION (MAJOR ${PROTOCOL_VERSION%%.*})"
+  assert_contains "hook-protocol-version-major-mismatch-lists-claim" "$PVD_MAJOR_OUT" "2.0.0 (MAJOR 2) at"
+
+  # (17b) A MINOR/PATCH-only difference must never block — advisory only,
+  # surfaced by Parts A/B instead. Fresh peer file (a real HEARTBEAT-based
+  # candidate replaces the prior one; check 1d always scans newest-first).
+  : > "$PVD_D/impl-alpha.md"
+  pvd_arm_signed_heartbeat "$PVD_D" impl-alpha "${PROTOCOL_VERSION%.*}.9"
+  PVD_MINOR_RC=0
+  PVD_MINOR_OUT=$("$ROOT/coordination-precommit-hook.sh" "$PVD_D" "orchestrator" < /dev/null 2>&1) || PVD_MINOR_RC=$?
+  assert_eq "hook-protocol-version-minor-mismatch-does-not-block-rc" "$PVD_MINOR_RC" "0"
+  assert_not_contains "hook-protocol-version-minor-mismatch-no-fail" "$PVD_MINOR_OUT" "FAIL [protocol-version]"
+
+  # (17c) Non-vacuous proof (same standard as every prior round): patch a
+  # scratch copy of the hook to DROP check 1d entirely and confirm the exact
+  # same MAJOR-mismatch fixture from (17) sails through with exit 0 — proves
+  # this test would actually have caught the check's absence, not merely
+  # that it now happens to pass.
+  # Copy ALL siblings (not just the hook itself) — _HOOK_HOME is derived
+  # from BASH_SOURCE, so a copy missing coord-receipt.sh/coord-verify.sh/etc
+  # would break unrelated code paths (e.g. check 1b's read_receipt call) and
+  # produce a false failure unrelated to check 1d.
+  PVD_VULN_DIR="$TMP/pvd-vuln-hookdir"
+  mkdir -p "$PVD_VULN_DIR"
+  cp "$ROOT/coord-verify.sh" "$ROOT/coord-remote-verify.sh" "$ROOT/coord-address-filter.sh" "$ROOT/coord-receipt.sh" "$ROOT/coord-presence.sh" "$ROOT/PROTOCOL-VERSION" "$PVD_VULN_DIR/"
+  PVD_VULN_HOOK="$PVD_VULN_DIR/coordination-precommit-hook.sh"
+  python3 - "$ROOT/coordination-precommit-hook.sh" "$PVD_VULN_HOOK" <<'PY'
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+s = open(src).read()
+start = s.index("# ── check 1d:")
+end = s.index("# ── check 2:")
+assert start != -1 and end != -1 and end > start, "check 1d markers not found"
+patched = s[:start] + s[end:]
+open(dst, "w").write(patched)
+PY
+  chmod +x "$PVD_VULN_HOOK"
+  bash -n "$PVD_VULN_HOOK"
+  # Restore fixture to the MAJOR-mismatch state (17b above left it MINOR).
+  : > "$PVD_D/impl-alpha.md"
+  pvd_arm_signed_heartbeat "$PVD_D" impl-alpha "2.0.0"
+  PVD_VULN_RC=0
+  PVD_VULN_OUT=$("$PVD_VULN_HOOK" "$PVD_D" "orchestrator" < /dev/null 2>&1) || PVD_VULN_RC=$?
+  echo "$PVD_VULN_OUT" | grep -q "FAIL \[protocol-version\]" && echo "PROVE-NONVACUOUS-FAILED: vulnerable copy still caught the mismatch" >&2
+  assert_eq "hook-protocol-version-check-1d-proven-nonvacuous-rc" "$PVD_VULN_RC" "0"
+  assert_not_contains "hook-protocol-version-check-1d-proven-nonvacuous-no-fail" "$PVD_VULN_OUT" "FAIL [protocol-version]"
+
+  # (17d)/(17e) ROUND-9 Cipher HIGH — re-attempt Cipher's exact two exploits
+  # against the FIXED hook and confirm both now have zero effect (the actual
+  # closing bar for this finding, not just that new tests pass).
+  PVDX_D="$TMP/pvdx-hub"
+  mkdir -p "$PVDX_D"
+  : > "$PVDX_D/orchestrator.md"
+  : > "$PVDX_D/impl-beta.md"
+  PVDX_OLINE=$("$ROOT/coord-keygen.sh" --generate --identity orchestrator --dir "$PVDX_D" 2>/dev/null)
+  "$ROOT/coord-keygen.sh" --enroll --identity orchestrator --pubkey-line "$PVDX_OLINE" --dir "$PVDX_D" >/dev/null
+  PVDX_BLINE=$("$ROOT/coord-keygen.sh" --generate --identity impl-beta --dir "$PVDX_D" 2>/dev/null)
+  "$ROOT/coord-keygen.sh" --enroll --identity impl-beta --pubkey-line "$PVDX_BLINE" --dir "$PVDX_D" >/dev/null
+
+  # Exploit 1: forge impl-beta's presence to a bogus MAJOR version with NO
+  # real signed claim posted anywhere — must have zero effect (no block).
+  mkdir -p "$PVDX_D/.presence"
+  printf 'identity=impl-beta\nprotocol_version=99.0.0\n' > "$PVDX_D/.presence/impl-beta"
+  PVDX_E1_RC=0
+  PVDX_E1_OUT=$("$ROOT/coordination-precommit-hook.sh" "$PVDX_D" "orchestrator" < /dev/null 2>&1) || PVDX_E1_RC=$?
+  assert_eq "hook-protocol-version-cipher-exploit1-forged-presence-no-effect-rc" "$PVDX_E1_RC" "0"
+  assert_contains "hook-protocol-version-cipher-exploit1-no-verified-claim-info" "$PVDX_E1_OUT" "no verified PROTOCOL-VERSION claim found for 'impl-beta'"
+
+  # Exploit 2: a REAL signed MAJOR mismatch exists; forge presence to MASK it
+  # by claiming a matching version — the real signed mismatch must still be
+  # caught, presence forgery must have zero effect either way.
+  pvd_arm_signed_heartbeat "$PVDX_D" impl-beta "2.0.0"
+  printf 'identity=impl-beta\nprotocol_version=%s\n' "$PROTOCOL_VERSION" > "$PVDX_D/.presence/impl-beta"
+  PVDX_E2_RC=0
+  PVDX_E2_OUT=$("$ROOT/coordination-precommit-hook.sh" "$PVDX_D" "orchestrator" < /dev/null 2>&1) || PVDX_E2_RC=$?
+  assert_eq "hook-protocol-version-cipher-exploit2-masking-presence-no-effect-rc" "$PVDX_E2_RC" "2"
+  assert_contains "hook-protocol-version-cipher-exploit2-real-mismatch-still-caught" "$PVDX_E2_OUT" "FAIL [protocol-version]: impl-beta has 1 signed+verified PROTOCOL-VERSION claim(s) incompatible"
+
+  # (17e2)/(17e3) ROUND-10 (2026-08-10, Cipher HIGH — round-9's fix moved this
+  # hole, did not close it). Round-9's candidate extraction was a SECOND,
+  # INDEPENDENT raw-file awk scan that only checked the candidate's TIMESTAMP
+  # against a coord-verify.sh VERIFIED line — never that the specific
+  # PROTOCOL-VERSION line sat inside the actually-signed bytes. Reproduce
+  # Cipher's exact two exploits (unsigned text appended straight after a
+  # real message's own SIG block, no new '### ' header) against the fixed
+  # code and confirm both now have zero effect.
+  PVDG_D="$TMP/pvdg-hub"
+  mkdir -p "$PVDG_D"
+  : > "$PVDG_D/orchestrator.md"
+  : > "$PVDG_D/impl-gamma.md"
+  PVDG_OLINE=$("$ROOT/coord-keygen.sh" --generate --identity orchestrator --dir "$PVDG_D" 2>/dev/null)
+  "$ROOT/coord-keygen.sh" --enroll --identity orchestrator --pubkey-line "$PVDG_OLINE" --dir "$PVDG_D" >/dev/null
+  PVDG_GLINE=$("$ROOT/coord-keygen.sh" --generate --identity impl-gamma --dir "$PVDG_D" 2>/dev/null)
+  "$ROOT/coord-keygen.sh" --enroll --identity impl-gamma --pubkey-line "$PVDG_GLINE" --dir "$PVDG_D" >/dev/null
+
+  # Exploit 1 (DoS): real signed claim legitimately matches the hub's own
+  # MAJOR (clean baseline) — appending UNSIGNED text after the SIG block
+  # claiming an incompatible MAJOR must NOT fabricate a mismatch.
+  pvd_arm_signed_heartbeat "$PVDG_D" impl-gamma "$PROTOCOL_VERSION"
+  PVDG_BASE_RC=0
+  PVDG_BASE_OUT=$("$ROOT/coordination-precommit-hook.sh" "$PVDG_D" "orchestrator" < /dev/null 2>&1) || PVDG_BASE_RC=$?
+  assert_eq "hook-protocol-version-round10-injection-baseline-clean-rc" "$PVDG_BASE_RC" "0"
+  printf '\nPROTOCOL-VERSION: 9.9.9\n' >> "$PVDG_D/impl-gamma.md"
+  PVDG_E1_RC=0
+  PVDG_E1_OUT=$("$ROOT/coordination-precommit-hook.sh" "$PVDG_D" "orchestrator" < /dev/null 2>&1) || PVDG_E1_RC=$?
+  assert_eq "hook-protocol-version-round10-injection-fake-mismatch-no-effect-rc" "$PVDG_E1_RC" "0"
+  assert_not_contains "hook-protocol-version-round10-injection-fake-mismatch-no-fail" "$PVDG_E1_OUT" "FAIL [protocol-version]"
+
+  # Exploit 2 (masking): real signed claim genuinely mismatches (2.0.0) —
+  # appending UNSIGNED text after the SIG block claiming a MATCHING version
+  # must NOT mask the real mismatch.
+  : > "$PVDG_D/impl-gamma.md"
+  pvd_arm_signed_heartbeat "$PVDG_D" impl-gamma "2.0.0"
+  PVDG_E2_BASE_RC=0
+  PVDG_E2_BASE_OUT=$("$ROOT/coordination-precommit-hook.sh" "$PVDG_D" "orchestrator" < /dev/null 2>&1) || PVDG_E2_BASE_RC=$?
+  assert_eq "hook-protocol-version-round10-injection-mask-baseline-fails-rc" "$PVDG_E2_BASE_RC" "2"
+  printf '\nPROTOCOL-VERSION: %s\n' "$PROTOCOL_VERSION" >> "$PVDG_D/impl-gamma.md"
+  PVDG_E2_RC=0
+  PVDG_E2_OUT=$("$ROOT/coordination-precommit-hook.sh" "$PVDG_D" "orchestrator" < /dev/null 2>&1) || PVDG_E2_RC=$?
+  assert_eq "hook-protocol-version-round10-injection-masking-no-effect-rc" "$PVDG_E2_RC" "2"
+  assert_contains "hook-protocol-version-round10-injection-masking-real-mismatch-still-caught" "$PVDG_E2_OUT" "FAIL [protocol-version]: impl-gamma has 1 signed+verified PROTOCOL-VERSION claim(s) incompatible"
+
+  # (17e4) Non-vacuous proof: a scratch coord-verify.sh copy whose
+  # --extract-field scan targets the WHOLE raw file instead of signed_region
+  # (reverting the round-10 fix) must let exploit 1 fabricate a mismatch —
+  # proving this test suite would actually have caught the vulnerability,
+  # not merely that it now happens to pass.
+  PVDG_VULN_DIR="$TMP/pvdg-vuln-hookdir"
+  mkdir -p "$PVDG_VULN_DIR"
+  cp "$ROOT/coordination-precommit-hook.sh" "$ROOT/coord-remote-verify.sh" "$ROOT/coord-address-filter.sh" "$ROOT/coord-receipt.sh" "$ROOT/coord-presence.sh" "$ROOT/PROTOCOL-VERSION" "$PVDG_VULN_DIR/"
+  python3 - "$ROOT/coord-verify.sh" "$PVDG_VULN_DIR/coord-verify.sh" <<'PY'
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+s = open(src).read()
+needle = '''            for line in signed_region.decode("utf-8", errors="replace").split("\\n"):
+                fm = extract_field_re.match(line.rstrip("\\r"))
+                if fm:
+                    print(f"FIELD-VERIFIED {frm} {ts} {fm.group(1)}")
+                    break'''
+# Vulnerable shape: scan the WHOLE raw file (not signed_region), and take
+# the LAST match rather than the first — this is what reproduces round-9's
+# original vulnerability, where injected trailing content (appearing AFTER
+# the real signed body in file order) silently overrode the real claim.
+replacement = '''            _last = None
+            for line in raw.decode("utf-8", errors="replace").split("\\n"):
+                fm = extract_field_re.match(line.rstrip("\\r"))
+                if fm:
+                    _last = fm.group(1)
+            if _last is not None:
+                print(f"FIELD-VERIFIED {frm} {ts} {_last}")'''
+assert needle in s, "extract-field scan-target block not found"
+s = s.replace(needle, replacement)
+open(dst, "w").write(s)
+PY
+  chmod +x "$PVDG_VULN_DIR/coord-verify.sh" "$PVDG_VULN_DIR/coordination-precommit-hook.sh"
+  bash -n "$PVDG_VULN_DIR/coord-verify.sh"
+  # Fixture is already at the exploit-1-injected state (clean 1.5.0 claim +
+  # unsigned trailing 9.9.9) from above — reset to that shape explicitly.
+  : > "$PVDG_D/impl-gamma.md"
+  pvd_arm_signed_heartbeat "$PVDG_D" impl-gamma "$PROTOCOL_VERSION"
+  printf '\nPROTOCOL-VERSION: 9.9.9\n' >> "$PVDG_D/impl-gamma.md"
+  PVDG_VULN_RC=0
+  PVDG_VULN_OUT=$("$PVDG_VULN_DIR/coordination-precommit-hook.sh" "$PVDG_D" "orchestrator" < /dev/null 2>&1) || PVDG_VULN_RC=$?
+  echo "$PVDG_VULN_OUT" | grep -q "FAIL \[protocol-version\]" || echo "PROVE-NONVACUOUS-FAILED: vulnerable coord-verify.sh copy did NOT reproduce the fake-mismatch exploit" >&2
+  assert_eq "hook-protocol-version-round10-proven-nonvacuous-rc" "$PVDG_VULN_RC" "2"
+  assert_contains "hook-protocol-version-round10-proven-nonvacuous-fail" "$PVDG_VULN_OUT" "FAIL [protocol-version]: impl-gamma has 1 signed+verified PROTOCOL-VERSION claim(s) incompatible"
+  assert_contains "hook-protocol-version-round10-proven-nonvacuous-fail-lists-9990" "$PVDG_VULN_OUT" "9.9.9 (MAJOR 9) at"
+
+  # (17e5)-(17e7) ROUND-11 (2026-08-10, Cipher HIGH — the third distinct way
+  # "which claim is authoritative" was gamed). coord-verify.sh emits
+  # FIELD-VERIFIED lines in physical file-byte-offset order, never by the
+  # message's own timestamp — a coord-dir-write attacker with ZERO signing
+  # key can physically reorder two of a peer's own, genuinely, honestly
+  # signed historical HEARTBEATs (no forgery, both still independently
+  # verify) and flip which one a "most recent wins" rule would have treated
+  # as current. Round-11 eliminates that arbitration: blocks on ANY verified
+  # incompatible-MAJOR claim in the tail window, so reordering has no effect
+  # in either direction.
+  pv_reorder_two_blocks() {
+    # <file> — physically swaps the two "### " message blocks in <file>,
+    # byte-for-byte, no content touched (Cipher's exact reorder mechanism).
+    python3 - "$1" <<'PY'
+import sys
+path = sys.argv[1]
+raw = open(path, "rb").read()
+lines = raw.splitlines(keepends=True)
+starts = [i for i, l in enumerate(lines) if l.startswith(b"### ")]
+assert len(starts) == 2, f"expected exactly 2 message headers, got {len(starts)}"
+blocks = []
+for idx, s in enumerate(starts):
+    e = starts[idx + 1] if idx + 1 < len(starts) else len(lines)
+    b = b"".join(lines[s:e])
+    if not b.endswith(b"\n"):
+        b += b"\n"
+    blocks.append(b)
+open(path, "wb").write(blocks[1] + blocks[0])
+PY
+  }
+
+  # (17e5) Mask direction: peer genuinely upgrades from a real mismatch
+  # (2.0.0) to a real match ($PROTOCOL_VERSION) — baseline correctly FAILs
+  # while the incompatible claim is still in the tail window (the accepted
+  # ceiling itself, not a bug — see README's Part D tradeoff note).
+  # Reordering must NOT change the verdict.
+  PVDO_D="$TMP/pvdo-hub"
+  mkdir -p "$PVDO_D"
+  : > "$PVDO_D/orchestrator.md"
+  : > "$PVDO_D/impl-delta.md"
+  PVDO_OLINE=$("$ROOT/coord-keygen.sh" --generate --identity orchestrator --dir "$PVDO_D" 2>/dev/null)
+  "$ROOT/coord-keygen.sh" --enroll --identity orchestrator --pubkey-line "$PVDO_OLINE" --dir "$PVDO_D" >/dev/null
+  PVDO_DLINE=$("$ROOT/coord-keygen.sh" --generate --identity impl-delta --dir "$PVDO_D" 2>/dev/null)
+  "$ROOT/coord-keygen.sh" --enroll --identity impl-delta --pubkey-line "$PVDO_DLINE" --dir "$PVDO_D" >/dev/null
+  pvd_arm_signed_heartbeat "$PVDO_D" impl-delta "2.0.0"
+  sleep 1.2
+  pvd_arm_signed_heartbeat "$PVDO_D" impl-delta "$PROTOCOL_VERSION"
+  PVDO_BASE_RC=0
+  PVDO_BASE_OUT=$("$ROOT/coordination-precommit-hook.sh" "$PVDO_D" "orchestrator" < /dev/null 2>&1) || PVDO_BASE_RC=$?
+  assert_eq "hook-protocol-version-round11-mask-baseline-fails-in-window-rc" "$PVDO_BASE_RC" "2"
+  pv_reorder_two_blocks "$PVDO_D/impl-delta.md"
+  PVDO_VERIFY_OUT=$(bash "$ROOT/coord-verify.sh" --dir "$PVDO_D" --file "$PVDO_D/impl-delta.md" --strict 2>&1)
+  assert_not_contains "hook-protocol-version-round11-mask-reorder-still-both-verify" "$PVDO_VERIFY_OUT" "INVALID"
+  PVDO_ATTACK_RC=0
+  PVDO_ATTACK_OUT=$("$ROOT/coordination-precommit-hook.sh" "$PVDO_D" "orchestrator" < /dev/null 2>&1) || PVDO_ATTACK_RC=$?
+  assert_eq "hook-protocol-version-round11-mask-reorder-no-effect-rc" "$PVDO_ATTACK_RC" "$PVDO_BASE_RC"
+  assert_contains "hook-protocol-version-round11-mask-reorder-still-caught" "$PVDO_ATTACK_OUT" "FAIL [protocol-version]: impl-delta has 1 signed+verified PROTOCOL-VERSION claim(s)"
+
+  # (17e6) Fabricate direction: peer genuinely rolls back from a real
+  # mismatch (2.0.0) to a real match — reordering so the OLD incompatible
+  # claim sits last must NOT change the verdict from the honest-order one
+  # (both are the same accepted-ceiling FAIL, not a reorder-triggered flip).
+  PVDP_D="$TMP/pvdp-hub"
+  mkdir -p "$PVDP_D"
+  : > "$PVDP_D/orchestrator.md"
+  : > "$PVDP_D/impl-epsilon.md"
+  PVDP_OLINE=$("$ROOT/coord-keygen.sh" --generate --identity orchestrator --dir "$PVDP_D" 2>/dev/null)
+  "$ROOT/coord-keygen.sh" --enroll --identity orchestrator --pubkey-line "$PVDP_OLINE" --dir "$PVDP_D" >/dev/null
+  PVDP_ELINE=$("$ROOT/coord-keygen.sh" --generate --identity impl-epsilon --dir "$PVDP_D" 2>/dev/null)
+  "$ROOT/coord-keygen.sh" --enroll --identity impl-epsilon --pubkey-line "$PVDP_ELINE" --dir "$PVDP_D" >/dev/null
+  pvd_arm_signed_heartbeat "$PVDP_D" impl-epsilon "2.0.0"
+  sleep 1.2
+  pvd_arm_signed_heartbeat "$PVDP_D" impl-epsilon "$PROTOCOL_VERSION"
+  PVDP_BASE_RC=0
+  PVDP_BASE_OUT=$("$ROOT/coordination-precommit-hook.sh" "$PVDP_D" "orchestrator" < /dev/null 2>&1) || PVDP_BASE_RC=$?
+  pv_reorder_two_blocks "$PVDP_D/impl-epsilon.md"
+  PVDP_ATTACK_RC=0
+  PVDP_ATTACK_OUT=$("$ROOT/coordination-precommit-hook.sh" "$PVDP_D" "orchestrator" < /dev/null 2>&1) || PVDP_ATTACK_RC=$?
+  assert_eq "hook-protocol-version-round11-fabricate-reorder-no-effect-rc" "$PVDP_ATTACK_RC" "$PVDP_BASE_RC"
+
+  # (17e7) Non-vacuous proof: a scratch hook copy reverted to "last
+  # FIELD-VERIFIED wins" (round-10's shape) must let the mask-direction
+  # reorder actually flip the verdict — proving this suite would have
+  # caught round-11's vulnerability, not merely that it now happens to pass.
+  PVDO_VULN_DIR="$TMP/pvdo-vuln-hookdir"
+  mkdir -p "$PVDO_VULN_DIR"
+  cp "$ROOT/coord-verify.sh" "$ROOT/coord-remote-verify.sh" "$ROOT/coord-address-filter.sh" "$ROOT/coord-receipt.sh" "$ROOT/coord-presence.sh" "$ROOT/PROTOCOL-VERSION" "$PVDO_VULN_DIR/"
+  python3 - "$ROOT/coordination-precommit-hook.sh" "$PVDO_VULN_DIR/coordination-precommit-hook.sh" <<'PY'
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+s = open(src).read()
+# Pass A: only the extraction line changes shape (collect-every-claim ->
+# last-claim-wins). Left as its own needle/replace so unrelated code
+# sitting immediately after this line in current source (untouched — not
+# what this proof is about) never needs to appear in either string.
+needle_a = '''          _pv_claims=$(printf '%s\\n' "$_pv_verify_out" | awk -v peer="$_pv_peer" '$1=="FIELD-VERIFIED" && $2==peer { v=$4; for (i=5;i<=NF;i++) v=v" "$i; print $3"|"v }')'''
+assert needle_a in s, "round-11 claims-extraction line not found"
+replacement_a = '''          _pv_peer_ver=$(printf '%s\\n' "$_pv_verify_out" | awk -v peer="$_pv_peer" '$1=="FIELD-VERIFIED" && $2==peer { v=$4; for (i=5;i<=NF;i++) v=v" "$i; last=v } END { if (last != "") print last }')'''
+s = s.replace(needle_a, replacement_a)
+# Pass B: the arbitration logic itself (collect-every-incompatible-claim ->
+# single-claim MAJOR check).
+needle_b = '''        if [[ -z "$_pv_claims" ]]; then
+          echo "INFO [protocol-version]: no verified PROTOCOL-VERSION claim found for '$_pv_peer' within the last $_PV_TAIL_VERIFIED_N verified message(s) of $_pv_peer_file — skipping (new peer, archived/rotated seat, pre-1.5.0 history, or nothing verified yet). Never hard-blocking on absent data."
+          continue
+        fi
+        _PV_KNOWN=$((_PV_KNOWN + 1))
+        _pv_incompatible=()
+        while IFS= read -r _pv_claim; do
+          _pv_cts="${_pv_claim%%|*}"
+          _pv_cver="${_pv_claim#*|}"
+          _pv_cmajor="${_pv_cver%%.*}"
+          [[ -n "$_pv_cmajor" && "$_pv_cmajor" != "$MY_PV_MAJOR" ]] && _pv_incompatible+=("$_pv_cver (MAJOR $_pv_cmajor) at $_pv_cts")
+        done <<< "$_pv_claims"
+        if [[ ${#_pv_incompatible[@]} -gt 0 ]]; then
+          echo ""
+          echo "FAIL [protocol-version]: $_pv_peer has ${#_pv_incompatible[@]} signed+verified PROTOCOL-VERSION claim(s) incompatible with this seat's own PROTOCOL $PROTOCOL_VERSION (MAJOR $MY_PV_MAJOR):"
+          for _pv_inc in "${_pv_incompatible[@]}"; do
+            echo "  - $_pv_inc"
+          done'''
+assert needle_b in s, "round-11 block-on-any-incompatible logic not found"
+replacement_b = '''        if [[ -z "$_pv_peer_ver" ]]; then
+          echo "INFO [protocol-version]: no verified PROTOCOL-VERSION claim found for '$_pv_peer' within the last $_PV_TAIL_VERIFIED_N verified message(s) of $_pv_peer_file — skipping (new peer, archived/rotated seat, pre-1.5.0 history, or nothing verified yet). Never hard-blocking on absent data."
+          continue
+        fi
+        _PV_KNOWN=$((_PV_KNOWN + 1))
+        _pv_peer_major="${_pv_peer_ver%%.*}"
+        if [[ -n "$_pv_peer_major" && "$_pv_peer_major" != "$MY_PV_MAJOR" ]]; then
+          echo ""
+          echo "FAIL [protocol-version]: $_pv_peer is running PROTOCOL $_pv_peer_ver (MAJOR $_pv_peer_major, signed+verified) — this seat is on PROTOCOL $PROTOCOL_VERSION (MAJOR $MY_PV_MAJOR)."'''
+s = s.replace(needle_b, replacement_b)
+open(dst, "w").write(s)
+PY
+  chmod +x "$PVDO_VULN_DIR/coordination-precommit-hook.sh"
+  bash -n "$PVDO_VULN_DIR/coordination-precommit-hook.sh"
+  # Fresh mask-direction fixture: real 2.0.0 mismatch, then real match.
+  # Under "last wins," honest chronological order (2.0.0 first, compatible
+  # last) correctly PASSes (rc=0) — the reverted hook's baseline. Reordering
+  # so the OLD 2.0.0 claim is now last flips "last wins" to FAIL (rc=2) —
+  # the exploit, masking is really fabrication-by-reorder here since baseline
+  # was already clean; the mirror of repro3.sh's mask direction.
+  PVDO_VULN_D="$TMP/pvdo-vuln-hub"
+  mkdir -p "$PVDO_VULN_D"
+  : > "$PVDO_VULN_D/orchestrator.md"
+  : > "$PVDO_VULN_D/impl-delta.md"
+  PVDO_VULN_OLINE=$("$ROOT/coord-keygen.sh" --generate --identity orchestrator --dir "$PVDO_VULN_D" 2>/dev/null)
+  "$ROOT/coord-keygen.sh" --enroll --identity orchestrator --pubkey-line "$PVDO_VULN_OLINE" --dir "$PVDO_VULN_D" >/dev/null
+  PVDO_VULN_DLINE=$("$ROOT/coord-keygen.sh" --generate --identity impl-delta --dir "$PVDO_VULN_D" 2>/dev/null)
+  "$ROOT/coord-keygen.sh" --enroll --identity impl-delta --pubkey-line "$PVDO_VULN_DLINE" --dir "$PVDO_VULN_D" >/dev/null
+  pvd_arm_signed_heartbeat "$PVDO_VULN_D" impl-delta "2.0.0"
+  sleep 1.2
+  pvd_arm_signed_heartbeat "$PVDO_VULN_D" impl-delta "$PROTOCOL_VERSION"
+  PVDO_VULN_BASE_RC=0
+  PVDO_VULN_BASE_OUT=$("$PVDO_VULN_DIR/coordination-precommit-hook.sh" "$PVDO_VULN_D" "orchestrator" < /dev/null 2>&1) || PVDO_VULN_BASE_RC=$?
+  pv_reorder_two_blocks "$PVDO_VULN_D/impl-delta.md"
+  PVDO_VULN_ATTACK_RC=0
+  PVDO_VULN_ATTACK_OUT=$("$PVDO_VULN_DIR/coordination-precommit-hook.sh" "$PVDO_VULN_D" "orchestrator" < /dev/null 2>&1) || PVDO_VULN_ATTACK_RC=$?
+  # Honest chronological order under "last wins" = [old 2.0.0, new compatible]
+  # -> the LAST claim (compatible) wins -> baseline PASSes (rc=0). Reorder
+  # swaps so the OLD 2.0.0 claim is now last -> "last wins" flips to FAIL
+  # (rc=2) -> the exploit (masking a real mismatch by controlling which
+  # claim sits last) reproduces as base_rc=0, attack_rc=2.
+  [[ "$PVDO_VULN_BASE_RC" -eq 0 && "$PVDO_VULN_ATTACK_RC" -ne 0 ]] || echo "PROVE-NONVACUOUS-FAILED: reverted 'last wins' copy did NOT reproduce the reorder exploit (base_rc=$PVDO_VULN_BASE_RC attack_rc=$PVDO_VULN_ATTACK_RC)" >&2
+  assert_eq "hook-protocol-version-round11-proven-nonvacuous-base-rc" "$PVDO_VULN_BASE_RC" "0"
+  assert_eq "hook-protocol-version-round11-proven-nonvacuous-attack-rc" "$PVDO_VULN_ATTACK_RC" "2"
+
+  # (17e8)-(17e10) ROUND-12 (2026-08-10, Cipher HIGH — a fourth distinct way
+  # this gate's window was gamed): the underlying `coord-verify.sh --tail N`
+  # window round-11's fix reads from is itself a RAW LINE COUNT, computed
+  # before any signature classification. A coord-dir-write-level attacker
+  # with ZERO signing key can append messages SHAPED to match the dead-man
+  # alarm's own documented --strict exemption (c) — tag starting "⚠️ ", body's
+  # first line the exact "[SIGNING-FAILED — ...]" sentinel; that exemption
+  # checks SHAPE only, never that heartbeat.sh itself produced it. Each one
+  # is legitimately non-fatal under --strict while ALSO counting as a raw
+  # line toward --tail's eviction boundary — enough of them pushes a peer's
+  # real, currently-true, genuinely signed+verified incompatible
+  # PROTOCOL-VERSION claim out of the window entirely. Fix: coord-verify.sh's
+  # new --tail-verified N computes its window from CLASSIFIED content — the
+  # last N spans that actually VERIFIED — so unsigned padding of any shape
+  # cannot consume any of that budget.
+  pv_append_exempt_padding() {
+    # <file> <from> <to> <count>
+    local f="$1" frm="$2" to="$3" n="$4" i=0
+    {
+      while [ "$i" -lt "$n" ]; do
+        printf '\n### 2026-08-10T00:%02d:00Z — %s → %s — \xe2\x9a\xa0\xef\xb8\x8f ATTACKER-PAD-%d\n\n[SIGNING-FAILED — heartbeat.sh could not sign this alarm; posting unsigned per documented dead-man-alarm exemption]\n' \
+          "$((i % 60))" "$frm" "$to" "$i"
+        i=$((i + 1))
+      done
+    } >> "$f"
+  }
+
+  PVDQ_D="$TMP/pvdq-hub"
+  mkdir -p "$PVDQ_D"
+  : > "$PVDQ_D/orchestrator.md"
+  : > "$PVDQ_D/impl-alpha2.md"
+  PVDQ_OLINE=$("$ROOT/coord-keygen.sh" --generate --identity orchestrator --dir "$PVDQ_D" 2>/dev/null)
+  "$ROOT/coord-keygen.sh" --enroll --identity orchestrator --pubkey-line "$PVDQ_OLINE" --dir "$PVDQ_D" >/dev/null
+  PVDQ_ALINE=$("$ROOT/coord-keygen.sh" --generate --identity impl-alpha2 --dir "$PVDQ_D" 2>/dev/null)
+  "$ROOT/coord-keygen.sh" --enroll --identity impl-alpha2 --pubkey-line "$PVDQ_ALINE" --dir "$PVDQ_D" >/dev/null
+  # Real, genuine, currently-true MAJOR-incompatible claim.
+  pvd_arm_signed_heartbeat "$PVDQ_D" impl-alpha2 "2.0.0"
+  PVDQ_BASE_RC=0
+  PVDQ_BASE_OUT=$("$ROOT/coordination-precommit-hook.sh" "$PVDQ_D" "orchestrator" < /dev/null 2>&1) || PVDQ_BASE_RC=$?
+  assert_eq "hook-protocol-version-round12-baseline-blocks-rc" "$PVDQ_BASE_RC" "2"
+
+  # 150 unsigned, zero-signing-key, exemption-(c)-shaped padding messages —
+  # more than enough to have evicted the real claim from a 400-raw-line
+  # --tail window under round-11's code.
+  pv_append_exempt_padding "$PVDQ_D/impl-alpha2.md" impl-alpha2 orchestrator 150
+  # coord-verify.sh --strict on the padded file must still pass clean — the
+  # padding is legitimately exempt, working exactly as exemption (c) is
+  # meant to (this is not the bug; the bug is that it ALSO evicted the real
+  # claim under raw-line --tail).
+  PVDQ_STRICT_RC=0
+  bash "$ROOT/coord-verify.sh" --dir "$PVDQ_D" --file "$PVDQ_D/impl-alpha2.md" --strict >/dev/null 2>&1 || PVDQ_STRICT_RC=$?
+  assert_eq "hook-protocol-version-round12-padding-still-strict-clean-rc" "$PVDQ_STRICT_RC" "0"
+
+  # Simulate the hub's own mailbox-read tracking having advanced past the
+  # padding (automatic on any armed watcher's normal wake cycle — no special
+  # action needed) so check 1c's OWN gate cannot incidentally mask whether
+  # check 1d's window logic itself is exploitable, isolating exactly what
+  # round-12 is about.
+  mkdir -p "$PVDQ_D/.watch-state/orchestrator"
+  write_receipt "$PVDQ_D/.watch-state/orchestrator/impl-alpha2.md.size" \
+    "$(wc -c < "$PVDQ_D/impl-alpha2.md" | tr -d ' ')" "$PVDQ_D/impl-alpha2.md"
+  PVDQ_ATTACK_RC=0
+  PVDQ_ATTACK_OUT=$("$ROOT/coordination-precommit-hook.sh" "$PVDQ_D" "orchestrator" < /dev/null 2>&1) || PVDQ_ATTACK_RC=$?
+  # (17e8) The real MAJOR mismatch must still block after padding — not be
+  # evicted from the window ("0 with a verified claim" was round-12's bug).
+  assert_eq "hook-protocol-version-round12-padding-no-effect-rc" "$PVDQ_ATTACK_RC" "2"
+  assert_contains "hook-protocol-version-round12-padding-claim-still-listed" "$PVDQ_ATTACK_OUT" "2.0.0 (MAJOR 2) at"
+  assert_contains "hook-protocol-version-round12-padding-checked-count" "$PVDQ_ATTACK_OUT" "1 with a verified PROTOCOL-VERSION claim"
+
+  # (17e9) Non-vacuous proof: a scratch coord-verify.sh copy with
+  # --tail-verified's classify-then-slice window reverted to the OLD
+  # raw-line --tail semantics (i.e. --tail-verified silently behaves like
+  # plain --tail) must let the SAME padding attack actually evict the real
+  # claim — proving this suite would have caught round-12's vulnerability,
+  # not merely that it now happens to pass.
+  PVDQ_VULN_DIR="$TMP/pvdq-vuln-verifydir"
+  mkdir -p "$PVDQ_VULN_DIR"
+  cp "$ROOT/coordination-precommit-hook.sh" "$ROOT/coord-remote-verify.sh" "$ROOT/coord-address-filter.sh" "$ROOT/coord-receipt.sh" "$ROOT/coord-presence.sh" "$ROOT/heartbeat.sh" "$ROOT/coord-keygen.sh" "$ROOT/PROTOCOL-VERSION" "$PVDQ_VULN_DIR/"
+  python3 - "$ROOT/coord-verify.sh" "$PVDQ_VULN_DIR/coord-verify.sh" <<'PY'
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+s = open(src).read()
+needle = '''if tail_verified_n > 0:
+    _tv_boundary = 0
+    _tv_seen = 0
+    for _tv_idx in range(len(results) - 1, -1, -1):
+        if results[_tv_idx][0] == "VERIFIED":
+            _tv_seen += 1
+            if _tv_seen >= tail_verified_n:
+                _tv_boundary = _tv_idx
+                break
+    results = results[_tv_boundary:]'''
+assert needle in s, "round-12 tail-verified classify-then-slice logic not found"
+# Reverts round-12's fix back to the original vulnerable shape: a raw
+# entry-count cut (counts every entry toward the budget, not just VERIFIED
+# ones) — the exact round-12 bug, where unsigned padding of any exempt
+# shape can spend a raw --tail-style budget it should never be able to
+# touch, evicting the real verified claim from the window.
+replacement = '''if tail_verified_n > 0:
+    _tv_boundary = max(0, len(results) - tail_verified_n)
+    results = results[_tv_boundary:]'''
+s = s.replace(needle, replacement)
+open(dst, "w").write(s)
+PY
+  chmod +x "$PVDQ_VULN_DIR/coord-verify.sh"
+  bash -n "$PVDQ_VULN_DIR/coord-verify.sh"
+  PVDQ_VULN_D="$TMP/pvdq-vuln-hub"
+  mkdir -p "$PVDQ_VULN_D"
+  : > "$PVDQ_VULN_D/orchestrator.md"
+  : > "$PVDQ_VULN_D/impl-alpha3.md"
+  PVDQ_VULN_OLINE=$("$ROOT/coord-keygen.sh" --generate --identity orchestrator --dir "$PVDQ_VULN_D" 2>/dev/null)
+  "$ROOT/coord-keygen.sh" --enroll --identity orchestrator --pubkey-line "$PVDQ_VULN_OLINE" --dir "$PVDQ_VULN_D" >/dev/null
+  PVDQ_VULN_ALINE=$("$ROOT/coord-keygen.sh" --generate --identity impl-alpha3 --dir "$PVDQ_VULN_D" 2>/dev/null)
+  "$ROOT/coord-keygen.sh" --enroll --identity impl-alpha3 --pubkey-line "$PVDQ_VULN_ALINE" --dir "$PVDQ_VULN_D" >/dev/null
+  PVDQ_VULN_HOME="$TMP/pvdq-vuln-hb-home"
+  mkdir -p "$PVDQ_VULN_HOME"
+  cp "$PVDQ_VULN_DIR/heartbeat.sh" "$PVDQ_VULN_DIR/coord-keygen.sh" "$PVDQ_VULN_DIR/coord-presence.sh" "$PVDQ_VULN_HOME/"
+  printf 'PROTOCOL_VERSION=%s\n' "2.0.0" > "$PVDQ_VULN_HOME/PROTOCOL-VERSION"
+  mkdir -p "$PVDQ_VULN_D/.watch-state/impl-alpha3"
+  ( sleep 30 & echo $! > "$PVDQ_VULN_D/.watch-state/impl-alpha3/watcher.pid" ) &
+  wait
+  PVDQ_VULN_HB_OUT="$TMP/pvdq-vuln-hb.out"
+  "$PVDQ_VULN_HOME/heartbeat.sh" --identity impl-alpha3 --role implementer --dir "$PVDQ_VULN_D" \
+    --idle-threshold 0 --cadence 1 --idle-policy "test policy" \
+    > "$PVDQ_VULN_HB_OUT" 2>&1 &
+  PVDQ_VULN_HB_PID=$!
+  wait_for_grep "$PVDQ_VULN_HB_OUT" "signed." 25 || true
+  kill "$PVDQ_VULN_HB_PID" 2>/dev/null || true
+  wait "$PVDQ_VULN_HB_PID" 2>/dev/null || true
+  pv_append_exempt_padding "$PVDQ_VULN_D/impl-alpha3.md" impl-alpha3 orchestrator 150
+  mkdir -p "$PVDQ_VULN_D/.watch-state/orchestrator"
+  write_receipt "$PVDQ_VULN_D/.watch-state/orchestrator/impl-alpha3.md.size" \
+    "$(wc -c < "$PVDQ_VULN_D/impl-alpha3.md" | tr -d ' ')" "$PVDQ_VULN_D/impl-alpha3.md"
+  PVDQ_VULN_ATTACK_RC=0
+  PVDQ_VULN_ATTACK_OUT=$("$PVDQ_VULN_DIR/coordination-precommit-hook.sh" "$PVDQ_VULN_D" "orchestrator" < /dev/null 2>&1) || PVDQ_VULN_ATTACK_RC=$?
+  [[ "$PVDQ_VULN_ATTACK_RC" -eq 0 ]] || echo "PROVE-NONVACUOUS-FAILED: reverted raw-tail copy did NOT reproduce the padding-eviction exploit (attack_rc=$PVDQ_VULN_ATTACK_RC)" >&2
+  # (17e9) The reverted (pre-round-12) copy must be FOOLED (rc=0, "0 with a
+  # verified claim") — proving the fix, not just the fixture, is what closes
+  # this.
+  assert_eq "hook-protocol-version-round12-proven-nonvacuous-attack-rc" "$PVDQ_VULN_ATTACK_RC" "0"
+  assert_contains "hook-protocol-version-round12-proven-nonvacuous-evicted" "$PVDQ_VULN_ATTACK_OUT" "0 with a verified PROTOCOL-VERSION claim"
+
+  # (17e10) Direct coverage of coord-verify.sh's own --tail-verified flag
+  # (not only through the hook): a single VERIFIED message followed by 150
+  # unsigned exempt padding messages — --tail-verified 1 must still surface
+  # the FIELD-VERIFIED line for the original message; plain --tail 5 (a
+  # small raw-line window that easily fits inside the padding alone) must
+  # NOT, demonstrating the concrete difference in behavior the fix depends
+  # on.
+  PVDS_D="$TMP/pvds-hub"
+  mkdir -p "$PVDS_D"
+  : > "$PVDS_D/orchestrator.md"
+  : > "$PVDS_D/impl-alpha4.md"
+  PVDS_OLINE=$("$ROOT/coord-keygen.sh" --generate --identity orchestrator --dir "$PVDS_D" 2>/dev/null)
+  "$ROOT/coord-keygen.sh" --enroll --identity orchestrator --pubkey-line "$PVDS_OLINE" --dir "$PVDS_D" >/dev/null
+  PVDS_ALINE=$("$ROOT/coord-keygen.sh" --generate --identity impl-alpha4 --dir "$PVDS_D" 2>/dev/null)
+  "$ROOT/coord-keygen.sh" --enroll --identity impl-alpha4 --pubkey-line "$PVDS_ALINE" --dir "$PVDS_D" >/dev/null
+  pvd_arm_signed_heartbeat "$PVDS_D" impl-alpha4 "2.0.0"
+  pv_append_exempt_padding "$PVDS_D/impl-alpha4.md" impl-alpha4 orchestrator 150
+  PVDS_TV_OUT=$(bash "$ROOT/coord-verify.sh" --dir "$PVDS_D" --file "$PVDS_D/impl-alpha4.md" --tail-verified 1 --extract-field PROTOCOL-VERSION 2>/dev/null)
+  assert_contains "coord-verify-tail-verified-finds-claim-behind-padding" "$PVDS_TV_OUT" "FIELD-VERIFIED impl-alpha4"
+  PVDS_TAIL5_OUT=$(bash "$ROOT/coord-verify.sh" --dir "$PVDS_D" --file "$PVDS_D/impl-alpha4.md" --tail 5 --extract-field PROTOCOL-VERSION 2>/dev/null)
+  # fixed to use assert_not_contains (was a bare echo PASS/FAIL that never
+  # incremented the suite's real $PASS/$FAIL counters or affected its exit
+  # code).
+  assert_not_contains "coord-verify-plain-tail-evicted-by-padding-contrast" "$PVDS_TAIL5_OUT" "FIELD-VERIFIED impl-alpha4"
+
+  # (17f) ROUND-9 Cipher — peer enumeration must derive from allowed_signers,
+  # not a mailbox-file-shaped list: an identity crafted to match
+  # coord_is_seat_outbox_basename's structural exclusion (e.g. "queue-evil")
+  # must still be checked and still block on a real MAJOR mismatch.
+  PVDN_D="$TMP/pvdn-hub"
+  mkdir -p "$PVDN_D"
+  : > "$PVDN_D/orchestrator.md"
+  : > "$PVDN_D/queue-evil.md"
+  PVDN_OLINE=$("$ROOT/coord-keygen.sh" --generate --identity orchestrator --dir "$PVDN_D" 2>/dev/null)
+  "$ROOT/coord-keygen.sh" --enroll --identity orchestrator --pubkey-line "$PVDN_OLINE" --dir "$PVDN_D" >/dev/null
+  PVDN_QLINE=$("$ROOT/coord-keygen.sh" --generate --identity queue-evil --dir "$PVDN_D" 2>/dev/null)
+  "$ROOT/coord-keygen.sh" --enroll --identity queue-evil --pubkey-line "$PVDN_QLINE" --dir "$PVDN_D" >/dev/null
+  pvd_arm_signed_heartbeat "$PVDN_D" queue-evil "2.0.0"
+  PVDN_RC=0
+  PVDN_OUT=$("$ROOT/coordination-precommit-hook.sh" "$PVDN_D" "orchestrator" < /dev/null 2>&1) || PVDN_RC=$?
+  assert_eq "hook-protocol-version-naming-evasion-peer-still-caught-rc" "$PVDN_RC" "2"
+  assert_contains "hook-protocol-version-naming-evasion-peer-still-caught-msg" "$PVDN_OUT" "FAIL [protocol-version]: queue-evil has 1 signed+verified PROTOCOL-VERSION claim(s) incompatible"
+
+  # (17g) ROUND-9 Rook — an archived/rotated peer (<id>.md renamed to
+  # <id>.archive.md, an ordinary lifecycle event) stays enrolled and must
+  # still be COUNTED (not silently invisible the way INBOX_FILES-based
+  # enumeration made it) even though its signed claim can no longer verify
+  # there (coord-verify.sh's structural FROM==basename(file) check rejects
+  # *.archive.md content by design — see coordination-precommit-hook.sh's
+  # check 1d comment). Never hard-blocks on this absence.
+  PVDR_D="$TMP/pvdr-hub"
+  mkdir -p "$PVDR_D"
+  : > "$PVDR_D/orchestrator.md"
+  : > "$PVDR_D/impl-rotated.md"
+  PVDR_OLINE=$("$ROOT/coord-keygen.sh" --generate --identity orchestrator --dir "$PVDR_D" 2>/dev/null)
+  "$ROOT/coord-keygen.sh" --enroll --identity orchestrator --pubkey-line "$PVDR_OLINE" --dir "$PVDR_D" >/dev/null
+  PVDR_RLINE=$("$ROOT/coord-keygen.sh" --generate --identity impl-rotated --dir "$PVDR_D" 2>/dev/null)
+  "$ROOT/coord-keygen.sh" --enroll --identity impl-rotated --pubkey-line "$PVDR_RLINE" --dir "$PVDR_D" >/dev/null
+  pvd_arm_signed_heartbeat "$PVDR_D" impl-rotated "2.0.0"
+  mv "$PVDR_D/impl-rotated.md" "$PVDR_D/impl-rotated.archive.md"
+  PVDR_RC=0
+  PVDR_OUT=$("$ROOT/coordination-precommit-hook.sh" "$PVDR_D" "orchestrator" < /dev/null 2>&1) || PVDR_RC=$?
+  assert_eq "hook-protocol-version-archived-peer-not-blocked-rc" "$PVDR_RC" "0"
+  assert_contains "hook-protocol-version-archived-peer-honestly-named" "$PVDR_OUT" "no verified PROTOCOL-VERSION claim found for 'impl-rotated'"
+  assert_contains "hook-protocol-version-archived-peer-checked-count" "$PVDR_OUT" "checked 1 enrolled peer(s), 0 with a verified"
+
+  # (17h) ROUND-9 Rook "fix this first" — self-side unknown-version guard.
+  # A partial/incomplete framework copy (PROTOCOL-VERSION file missing
+  # beside the hook) must WARN + skip the whole gate, never false-block
+  # every peer by comparing "unknown" against a real MAJOR number.
+  PVDU_HOOKDIR="$TMP/pvdu-hookdir"
+  mkdir -p "$PVDU_HOOKDIR"
+  cp "$ROOT/coordination-precommit-hook.sh" "$ROOT/coord-verify.sh" "$ROOT/coord-remote-verify.sh" "$ROOT/coord-address-filter.sh" "$ROOT/coord-receipt.sh" "$ROOT/coord-presence.sh" "$PVDU_HOOKDIR/"
+  # Deliberately no PROTOCOL-VERSION file copied.
+  chmod +x "$PVDU_HOOKDIR/coordination-precommit-hook.sh"
+  # ROUND-10 (Rook): must point at a dir with a LIVE, verified MAJOR-
+  # mismatching peer (PVDN_D — queue-evil's real signed 2.0.0 claim), not
+  # PVDR_D (the archived-peer dir, where _PV_KNOWN would be 0 regardless of
+  # the guard — removing the guard wouldn't flip this test red there, so it
+  # wasn't actually testing anything). Against PVDN_D, a guard-less
+  # comparison would try "unknown" != "2" and produce a false FAIL — this is
+  # what proves the guard is load-bearing.
+  PVDU_RC=0
+  PVDU_OUT=$("$PVDU_HOOKDIR/coordination-precommit-hook.sh" "$PVDN_D" "orchestrator" < /dev/null 2>&1) || PVDU_RC=$?
+  assert_eq "hook-protocol-version-self-unknown-skips-not-blocks-rc" "$PVDU_RC" "0"
+  assert_contains "hook-protocol-version-self-unknown-warns" "$PVDU_OUT" "WARN [protocol-version]: this seat's own PROTOCOL_VERSION is unknown"
+  assert_not_contains "hook-protocol-version-self-unknown-no-false-fail" "$PVDU_OUT" "FAIL [protocol-version]"
+
+  # (17i) ROUND-9 Rook — the coord-monitor.sh half of the same self-unknown
+  # guard: must WARN and skip Part B's peer checks entirely, never crash and
+  # never compare "unknown" against a real peer version.
+  PVDM_HOME="$TMP/pvdm-monitor-home"
+  mkdir -p "$PVDM_HOME"
+  cp "$ROOT/coord-monitor.sh" "$ROOT/coord-presence.sh" "$ROOT/coord-send.sh" "$ROOT/coord-keygen.sh" "$ROOT/coord-verify.sh" "$ROOT/coord-remote-verify.sh" "$ROOT/coord-address-filter.sh" "$ROOT/coord-receipt.sh" "$PVDM_HOME/"
+  # Deliberately no PROTOCOL-VERSION file copied.
+  PVDM_D="$TMP/pvdm-hub"
+  mkdir -p "$PVDM_D/.watch-state/impl-x"
+  : > "$PVDM_D/orchestrator.md"
+  : > "$PVDM_D/impl-x.md"
+  PVDM_OLINE=$("$ROOT/coord-keygen.sh" --generate --identity orchestrator --dir "$PVDM_D" 2>/dev/null)
+  "$ROOT/coord-keygen.sh" --enroll --identity orchestrator --pubkey-line "$PVDM_OLINE" --dir "$PVDM_D" >/dev/null
+  mkdir -p "$PVDM_D/.presence"
+  printf 'identity=impl-x\nprotocol_version=9.9.9\n' > "$PVDM_D/.presence/impl-x"
+  PVDM_OUT="$TMP/pvdm-monitor.out"
+  : > "$PVDM_OUT"
+  bash "$PVDM_HOME/coord-monitor.sh" --identity orchestrator --dir "$PVDM_D" --poll 1 > "$PVDM_OUT" 2>&1 &
+  PVDM_PID=$!
+  wait_for_grep "$PVDM_OUT" "ARMED for orchestrator" 25 || true
+  sleep 1
+  kill "$PVDM_PID" 2>/dev/null || true
+  wait "$PVDM_PID" 2>/dev/null || true
+  assert_contains "monitor-protocol-version-self-unknown-warns" "$(cat "$PVDM_OUT")" "this seat's own PROTOCOL_VERSION is unknown"
+  assert_not_contains "monitor-protocol-version-self-unknown-no-alert" "$(cat "$PVDM_D/orchestrator.md")" "PROTOCOL-VERSION-MISMATCH"
+
+  # (17j) ROUND-9 item 2 — the dedup state write + "Alert posted" message
+  # must only happen on an ACTUAL coord-send.sh success, and its real
+  # failure reason must be surfaced, not swallowed via 2>&1.
+  PVDF_HOME="$TMP/pvdf-monitor-home"
+  mkdir -p "$PVDF_HOME"
+  cp "$ROOT/coord-monitor.sh" "$ROOT/coord-presence.sh" "$ROOT/coord-keygen.sh" "$ROOT/coord-verify.sh" "$ROOT/coord-remote-verify.sh" "$ROOT/coord-address-filter.sh" "$ROOT/coord-receipt.sh" "$ROOT/PROTOCOL-VERSION" "$PVDF_HOME/"
+  cat > "$PVDF_HOME/coord-send.sh" <<'STUB'
+#!/bin/bash
+echo "PVDF-STUB-SEND-FAILURE: simulated coord-send.sh failure for round-9 test" >&2
+exit 9
+STUB
+  chmod +x "$PVDF_HOME/coord-send.sh"
+  PVDF_D="$TMP/pvdf-hub"
+  mkdir -p "$PVDF_D/.watch-state/impl-x"
+  : > "$PVDF_D/orchestrator.md"
+  : > "$PVDF_D/impl-x.md"
+  PVDF_OLINE=$("$ROOT/coord-keygen.sh" --generate --identity orchestrator --dir "$PVDF_D" 2>/dev/null)
+  "$ROOT/coord-keygen.sh" --enroll --identity orchestrator --pubkey-line "$PVDF_OLINE" --dir "$PVDF_D" >/dev/null
+  mkdir -p "$PVDF_D/.presence"
+  printf 'identity=impl-x\nprotocol_version=9.9.9\n' > "$PVDF_D/.presence/impl-x"
+  PVDF_OUT="$TMP/pvdf-monitor.out"
+  : > "$PVDF_OUT"
+  bash "$PVDF_HOME/coord-monitor.sh" --identity orchestrator --dir "$PVDF_D" --poll 1 > "$PVDF_OUT" 2>&1 &
+  PVDF_PID=$!
+  wait_for_grep "$PVDF_OUT" "ARMED for orchestrator" 25 || true
+  sleep 1
+  kill "$PVDF_PID" 2>/dev/null || true
+  wait "$PVDF_PID" 2>/dev/null || true
+  assert_contains "monitor-protocol-version-send-failure-surfaced" "$(cat "$PVDF_OUT")" "PVDF-STUB-SEND-FAILURE"
+  assert_not_contains "monitor-protocol-version-send-failure-no-false-posted-msg" "$(cat "$PVDF_OUT")" "Alert posted to"
+  PVDF_STATE_COUNT=$(find "$PVDF_D/.watch-state" -name "protocol-version.*" 2>/dev/null | wc -l | tr -d ' ')
+  assert_eq "monitor-protocol-version-send-failure-no-state-write" "$PVDF_STATE_COUNT" "0"
+
+  # (17k) ROUND-9 item 3 — COORD_CANONICAL_SOURCE newline/CR injection must
+  # be rejected (falls back to default wording), same rejection posture as
+  # round 6's 4-site fix, not silently spliced into a signed message body.
+  PVDC_INJECTED=$(printf 'evil\n\n### 2020-01-01T00:00:00Z — attacker → ALL — FAKE-TAG\nfake body')
+  PVDC_MSG=$(bash -c '. "$1/coord-presence.sh"; COORD_CANONICAL_SOURCE="$2" protocol_mismatch_message orchestrator 1.5.0 impl-x 2.0.0' _ "$ROOT" "$PVDC_INJECTED" 2>/dev/null)
+  assert_not_contains "presence-canonical-source-injection-rejected" "$PVDC_MSG" "FAKE-TAG"
+  assert_contains "presence-canonical-source-injection-falls-back" "$PVDC_MSG" "ask your Orchestrator/human where the canonical framework repo lives"
+
+  # (17l) ROUND-9 item 4 — Part B's alert must be surfaced by the RECEIVING
+  # peer's OWN live monitor sweep (not just proven to land in the sender's
+  # own outbox file, which the pre-existing (16) tests already cover).
+  PVDL_D="$TMP/pvdl-hub"
+  mkdir -p "$PVDL_D/.watch-state/impl-y" "$PVDL_D/.watch-state/orchestrator"
+  : > "$PVDL_D/orchestrator.md"
+  : > "$PVDL_D/impl-y.md"
+  PVDL_OLINE=$("$ROOT/coord-keygen.sh" --generate --identity orchestrator --dir "$PVDL_D" 2>/dev/null)
+  "$ROOT/coord-keygen.sh" --enroll --identity orchestrator --pubkey-line "$PVDL_OLINE" --dir "$PVDL_D" >/dev/null
+  PVDL_YLINE=$("$ROOT/coord-keygen.sh" --generate --identity impl-y --dir "$PVDL_D" 2>/dev/null)
+  "$ROOT/coord-keygen.sh" --enroll --identity impl-y --pubkey-line "$PVDL_YLINE" --dir "$PVDL_D" >/dev/null
+  PVDL_Y_OUT="$TMP/pvdl-implY-mon.out"
+  : > "$PVDL_Y_OUT"
+  "$ROOT/coord-monitor.sh" --identity impl-y --dir "$PVDL_D" --role implementer --poll 1 > "$PVDL_Y_OUT" 2>&1 &
+  PVDL_Y_PID=$!
+  wait_for_grep "$PVDL_Y_OUT" "ARMED for impl-y" 25 || true
+  mkdir -p "$PVDL_D/.presence"
+  printf 'identity=impl-y\nprotocol_version=2.0.0\n' > "$PVDL_D/.presence/impl-y"
+  "$ROOT/coord-monitor.sh" --identity orchestrator --dir "$PVDL_D" --poll 1 > "$TMP/pvdl-orch-mon.out" 2>&1 &
+  PVDL_O_PID=$!
+  # Wait for the SIG-verification line specifically, not just the message
+  # text — verification is a follow-up step that can land a tick after the
+  # body first prints, and asserting on the earlier marker flaked here.
+  wait_for_grep "$PVDL_Y_OUT" "✅ VERIFIED orchestrator" 40 || true
+  kill "$PVDL_Y_PID" "$PVDL_O_PID" 2>/dev/null || true
+  wait "$PVDL_Y_PID" "$PVDL_O_PID" 2>/dev/null || true
+  assert_contains "monitor-protocol-version-receiving-peer-surfaces-alert" "$(cat "$PVDL_Y_OUT")" "⚠️ PROTOCOL-VERSION-MISMATCH"
+  assert_contains "monitor-protocol-version-receiving-peer-alert-verified" "$(cat "$PVDL_Y_OUT")" "✅ VERIFIED orchestrator"
 else
   echo "SKIP [sig] Message Authenticity tests skipped (see above)."
 fi

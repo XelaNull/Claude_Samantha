@@ -316,6 +316,52 @@ filesystem-perms-based trust model everywhere else, not just here.
 
 ---
 
+## Protocol Version Handshake (Remote Ceiling) — PROTOCOL 1.5.0
+
+Neither half of § Protocol Version Handshake (main `README.md`) is wired to
+the remote channel today. Both scope statements are stated as design
+decisions, not "not possible" — the framing matters for anyone considering
+extending this later:
+
+- **Part B (advisory re-arm alert).** Scoped to the LOCAL channel because a
+  remote seat's `.presence` sidecar lives on a different host and isn't
+  reachable via a local `presence_get` lookup at all — see main `README.md`
+  § Protocol Version Handshake, Part B.
+- **Part D (hard-block MAJOR-mismatch gate).** Different reason: a remote
+  seat's presence sidecar IS partially reachable already, via
+  `remote_sweep_script`'s existing `PRES <name> <mtime>` wire records (see
+  § What `coord-monitor.sh`'s remote channel does now above) — but that
+  record carries only the sidecar file's **mtime**, for `SEAT STALE`
+  staleness detection (`remote_presence_check` above), never the sidecar's
+  actual field VALUES. A remote peer's `protocol_version` is not on the wire
+  today; reaching it would need either a new wire record type or a full
+  remote fetch-and-parse of the presence file's content, neither of which
+  exists. Even setting that aside, Part D's round-9 hardening (main
+  `README.md`) specifically requires a SIGNED source (a peer's own
+  already-signed `HEARTBEAT` body, verified via `coord-verify.sh`) precisely
+  *because* the unsigned presence sidecar is coord-dir-write-forgeable and
+  round-9 closed a live-demonstrated presence-forgery hole on the LOCAL
+  channel over it. Wiring Part D to the remote channel would mean either (a)
+  trusting remote presence anyway — reopening the exact forgery class
+  round-9 just closed, just remotely — or (b) building the equivalent
+  signed-HEARTBEAT-lookup machinery against a remote bus dir, which means
+  extending `verify_remote_buffer`'s fetch-then-verify path (§ Message
+  Authenticity above) to scan multiple historical messages per peer instead
+  of the single most-recent one it handles today. Both are real, separate
+  pieces of work — explicitly out of scope for the round that hardened the
+  local case.
+
+**Net effect:** a remote seat running a MAJOR-mismatched protocol version is
+NOT caught by `coordination-precommit-hook.sh`'s hard-block gate, and not
+surfaced by any automated alert on the remote channel either. The only
+visibility is manual: a remote seat's own `coord-monitor.sh` arm banner
+prints its own `PROTOCOL %s` stamp directly (e.g. "PROTOCOL 1.5.0") to
+whoever is watching that seat's own output — `coord-status.sh` does not
+currently surface a peer's protocol version at all. This is an accepted
+ceiling for 1.5.0, not an oversight.
+
+---
+
 ## Cutover checklist (hub)
 
 1. Ensure remote ssh alias works non-interactively (`ssh -o BatchMode=yes <alias> true`).

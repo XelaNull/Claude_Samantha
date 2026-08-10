@@ -65,6 +65,17 @@ BOOTSTRAP_HOME="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)"
 # never drift on where a given identity's signing key lives.
 [[ -f "$BOOTSTRAP_HOME/coord-keygen.sh" ]] && . "$BOOTSTRAP_HOME/coord-keygen.sh"
 
+# PROTOCOL 1.5.0 §3.5 Part A: the newborn announces its own PROTOCOL-VERSION
+# in the same HEADS-UP that carries its pubkey — same carrier, no new
+# message type (the pubkey-carrying first-contact message is already
+# necessarily unsigned/exempt, chicken-and-egg, before enrollment). This is
+# announce-only: the newborn has no way to know the hub's version yet, so no
+# mismatch comparison happens here — that's the Orchestrator's job when
+# composing the ASSIGN-IDENTITY reply (README § Identity Bootstrap step D).
+PROTOCOL_VERSION="unknown"
+# shellcheck source=PROTOCOL-VERSION
+[[ -f "$BOOTSTRAP_HOME/PROTOCOL-VERSION" ]] && . "$BOOTSTRAP_HOME/PROTOCOL-VERSION"
+
 # ── argument parsing ──────────────────────────────────────────────────────────
 
 MODE=""
@@ -159,10 +170,14 @@ Newborn implementer requesting identity assignment.
 zone: $ZONE
 state: awaiting-name
 pubkey: $pub_line
+PROTOCOL-VERSION: $PROTOCOL_VERSION
 
 Please reply in orchestrator.md with ASSIGN-IDENTITY addressed to $prov_id, and enroll
 the pubkey above under the assigned name (PROTOCOL 1.4.0):
   coord-keygen.sh --enroll --identity <assigned-name> --pubkey-line "$pub_line" --dir <coord-dir>
+Include your own PROTOCOL-VERSION in the reply too (PROTOCOL 1.5.0 § Identity
+Bootstrap step D) — if it differs from mine above, say so plainly; never block
+adoption over a version difference alone.
 EOF
 
   mv "$tmp" "$prov_file"
@@ -174,6 +189,10 @@ EOF
   fi
   if ! grep -qF "pubkey:" "$prov_file" 2>/dev/null; then
     echo "FATAL: provisional file write did not persist the pubkey line: $prov_file" >&2
+    exit 1
+  fi
+  if ! grep -qF "PROTOCOL-VERSION:" "$prov_file" 2>/dev/null; then
+    echo "FATAL: provisional file write did not persist the PROTOCOL-VERSION line: $prov_file" >&2
     exit 1
   fi
 

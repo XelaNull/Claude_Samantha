@@ -1,11 +1,92 @@
 # Coordination Protocol — Orchestrator–Implementer
 
-PROTOCOL-VERSION: 1.4.0
+PROTOCOL-VERSION: 1.5.0
 
 > **Versioning:** bump `PROTOCOL-VERSION` (file + this stamp) on every ratified amendment.
 > **Scripts are versioned with the protocol** — `PROTOCOL-VERSION` is sourced by
 > `coord-monitor.sh` / `heartbeat.sh`; arm banners print the stamp. A seat running
 > scripts whose stamp ≠ this README is a defect.
+>
+> **1.5.0** (2026-08-10) — Protocol Version Handshake: peer staleness detection +
+> self-upgrade pointer, never a push:
+> - **Bootstrap-time exchange (Part A):** the newborn's `🛰️ HEADS-UP` and the
+>   Orchestrator's `🤝 ASSIGN-IDENTITY` reply now both carry `PROTOCOL-VERSION:
+>   X.Y.Z` — two-directional (used to be announce-only). Never blocks bootstrap
+>   over a version difference alone.
+> - **Re-arm-time staleness detection (Part B):** `coord-monitor.sh` compares
+>   each known peer's last-known presence `protocol_version` to its own on
+>   every LOCAL-channel arm, and posts ONE addressed `⚠️ PROTOCOL-VERSION-MISMATCH`
+>   alert on a genuinely new mismatch — deduped the same way `SEAT STALE`
+>   already is, never spammed every arm cycle.
+> - **Self-upgrade pointer (Part C):** the mismatch message names both
+>   versions and WHERE the newer one lives — `git pull` for the common
+>   local/shared-repo topology, or `COORD_CANONICAL_SOURCE` for cross-repo/
+>   remote-seat. Never embeds file content, a diff, or a script — a pointer,
+>   not a payload.
+> - **MAJOR/MINOR/PATCH given real meaning (Part D):** MAJOR = wire/grammar-
+>   breaking, MINOR = additive/backward-compatible, PATCH = non-semantic.
+>   Nothing shipped 1.1.0-1.4.0 was ever MAJOR under this definition.
+>   `coordination-precommit-hook.sh` hard-blocks on a MAJOR mismatch only;
+>   MINOR/PATCH stay advisory (A/B above).
+> - **Hardened (2026-08-10, round-9 — Cipher HIGH, live-demonstrated both
+>   directions):** Part D's hard-block gate no longer trusts the unsigned,
+>   coord-dir-write-forgeable `.presence` sidecar for a peer's version — a
+>   forged presence value could fabricate a false MAJOR mismatch (DoS) or
+>   mask a real one (defeat the gate). It now derives a peer's version
+>   ONLY from their own already-signed, routine `HEARTBEAT` body (which now
+>   embeds `PROTOCOL-VERSION`), verified via `coord-verify.sh`'s own engine
+>   — never a second, parallel verification path. Peer enumeration also
+>   moved from local mailbox-file presence (evadable by a maliciously-named
+>   identity; blind to an archived/rotated seat) to `allowed_signers`, the
+>   actual enrolled-identity trust root. **Part B stays presence-sourced,
+>   deliberately** — advisory-only, informational, cheap, frequent; Cipher
+>   separately rated that path's forgery risk LOW, and the human's
+>   hard-block decision is what makes signed-sourcing worth its cost, not
+>   every consumer of `protocol_version`. See § Protocol Version Handshake,
+>   Part D below for the full mechanism and its ceilings.
+> - **Hardened further (2026-08-10, round-10 — Cipher HIGH, round-9's fix
+>   moved this hole, did not close it):** round-9's extraction was a second,
+>   independent raw-file scan matched back to a verified message only by
+>   timestamp — never confirming the specific `PROTOCOL-VERSION` line sat
+>   inside the actually-signed bytes. Unsigned text appended straight after
+>   a real message's own SIG block sailed through. Fix: `coord-verify.sh
+>   --extract-field NAME` scans ONLY the exact bytes it verified for that
+>   message (`signed_region`) and prints the value from there — no second
+>   scan of any kind.
+> - **Hardened a third time (2026-08-10, round-11 — Cipher HIGH, the third
+>   distinct way "which claim is authoritative" was gamed):** round-10 still
+>   picked a single "current" claim (the last `FIELD-VERIFIED` line,
+>   physical file order) — a coord-dir-write attacker with ZERO signing key
+>   could physically reorder two of a peer's own genuinely-signed historical
+>   claims to flip which one counted, no forgery needed. Round-11 stops
+>   picking a winner entirely: blocks on ANY verified incompatible-MAJOR
+>   claim in the tail window, full stop. Accepted tradeoff: a brief,
+>   self-resolving false-positive block right after a genuine MAJOR
+>   transition, until the tail window ages the old claim out — see § Protocol
+>   Version Handshake, Part D for the full reasoning.
+> - **Hardened a fourth time (2026-08-10, round-12 — Cipher HIGH, one layer
+>   above round-11's fix):** round-11 correctly stopped arbitrating which
+>   claim wins, but the tail window feeding that collection — plain
+>   `coord-verify.sh --tail N` — was still a RAW LINE COUNT, computed before
+>   any signature classification. A coord-dir-write attacker with ZERO
+>   signing key could append unsigned messages shaped to match the dead-man
+>   alarm's own documented `--strict` exemption (tag `⚠️ ` + the
+>   `[SIGNING-FAILED — ...]` sentinel — legitimately non-fatal under
+>   `--strict`, working exactly as designed) purely to inflate the raw-line
+>   count and evict a peer's real, current, genuinely signed+verified
+>   incompatible claim from the window — one-directional (can only hide a
+>   real mismatch, never fabricate a fake one), but that is this gate's
+>   single worst-case failure. Fix: new `coord-verify.sh --tail-verified N`
+>   computes its window from CLASSIFIED content — the last N spans that
+>   actually verify — so unsigned padding of any shape cannot consume any of
+>   that budget; it is skipped for free. Same structural principle as
+>   round-10's `--extract-field` fix, applied one layer up: to window
+>   selection instead of field extraction.
+> - New shared helpers: `coord-presence.sh`'s `protocol_version_major` /
+>   `protocol_mismatch_severity` / `protocol_mismatch_message`.
+> - See § Message Authenticity, Protocol Version Handshake below for the full
+>   mechanism.
+> - Tests: `tests/run.sh`.
 >
 > **1.4.0** (2026-08-09) — Message Authenticity (SSH signing): origin authentication +
 > tamper-evidence on the mailbox message bus, via `ssh-keygen -Y sign`/`-Y verify`
@@ -474,6 +555,207 @@ Re-keying an identity (compromised key, lost key, routine hygiene) is
 It replaces what every reader currently trusts for that identity, so confirm
 out-of-band that the rotation is genuine before running it.
 
+### Protocol Version Handshake
+
+**PROTOCOL 1.5.0.** Nothing before this detected a peer running a stale
+coordination-protocol install. Each seat already writes its own
+`protocol_version` into its own `.presence` on every arm (`coord-monitor.sh`,
+`heartbeat.sh`); this amendment adds the pieces that actually READ and
+compare it, plus a bounded self-upgrade pointer — never a push.
+
+**MAJOR / MINOR / PATCH, given real meaning for the first time:**
+
+- **MAJOR** — wire/grammar-breaking: a seat on the old MAJOR cannot correctly
+  produce or parse what the new MAJOR expects.
+- **MINOR** — additive/backward-compatible. Every amendment shipped 1.1.0
+  through 1.4.0 to date matches this tier.
+- **PATCH** — non-semantic: docs/test-only, no behavior change.
+
+This is a forward-looking convention, not a retroactive reclassification —
+**nothing shipped to date was ever a MAJOR bump under this definition.**
+MAJOR is the only tier `coordination-precommit-hook.sh` blocks on (see Scope
+below); MINOR/PATCH are advisory-only, surfaced by the two mechanisms below.
+
+**A — bootstrap-time exchange.** The pubkey-carrying first-contact messages
+(already necessarily unsigned/exempt — chicken-and-egg, nothing exists yet to
+verify against) carry `PROTOCOL-VERSION: X.Y.Z` alongside the pubkey: the
+newborn's `🛰️ HEADS-UP` (both the `--provision` path and the manual
+pre-assigned-identity path, Bootstrap Checklist step 4b) announces its own;
+the Orchestrator's `🤝 ASSIGN-IDENTITY` reply (step D) now carries the hub's
+own back — this exchange used to be one-directional. On a mismatch,
+enrollment proceeds exactly as it would on a match, unconditionally — a
+version difference alone never blocks bootstrap. The reply just also carries
+the plain-language mismatch note below if versions differ.
+
+**B — re-arm-time staleness detection.** Bootstrap-time exchange only ever
+fires once, at first contact — it never re-fires for a seat that already
+bootstrapped and simply forgot to upgrade before its next restart. This is
+the part that actually catches that case: on every LOCAL-channel
+`coord-monitor.sh` arm, after writing this seat's own `protocol_version` to
+presence, it walks the same peer roster message delivery already uses and
+compares each peer's last-known presence `protocol_version` to its own. On a
+mismatch it posts ONE loud, addressed `⚠️ PROTOCOL-VERSION-MISMATCH` message
+into its own outbox (the STAR addressing filter delivers it to the stale
+peer, same as `⚠️ WATCHER-DOWN`/`⚠️ HOLD-WAKE-UNACKED`) — not just local
+stdout, so the peer's own session and a human reading their file both notice
+it. It does not spam this every arm cycle: a state file
+(`.watch-state/<id>/monitor/protocol-version.<peer>.state`) gates the alert
+the same way the SEAT STALE check's `wasstale` state file does, alerting
+again only on a genuinely NEW mismatch (either side's version changes), and
+clearing the moment versions agree again. Scoped to the LOCAL channel only —
+a remote seat's presence lives on a different host and isn't reachable via a
+local presence lookup; not extended to the remote channel this round.
+
+**C — self-upgrade pointer, not a push (human's explicit design call).** The
+mismatch message (both A's bootstrap reply and B's re-arm alert use the SAME
+wording, `coord-presence.sh`'s `protocol_mismatch_message()`) names the two
+versions, the severity, and WHERE the newer version lives — never a diff, a
+script, or embedded file content. The receiving seat's own agent session is
+responsible for fetching/copying under its own local tooling and initiative,
+exactly like a manual sync today; this message is not a distribution channel.
+Remediation text depends on topology:
+  - **Local/shared-repo** (the common case — Orchestrator and Implementer
+    share a repo checkout; this framework's own `DEPLOYMENTS.md` model is
+    copy-based, not centrally pushed): zero-cost — `git pull`, then re-arm.
+    This is the default wording.
+  - **Cross-repo/remote-seat:** set `COORD_CANONICAL_SOURCE` (optional env
+    var, empty by default) to the canonical framework location. Unset, the
+    message asks the peer to check with their Orchestrator/human rather than
+    fabricate a path.
+
+**D — Scope.** `coordination-precommit-hook.sh` adds a protocol-version gate:
+if a peer's MAJOR version differs from this seat's own MAJOR version, the
+commit is blocked (`FAIL`, exit 2 — same reporting style as the other checks
+in that file). MINOR/PATCH differences never block — advisory only, via A/B
+above. As of 1.5.0 this check cannot fire on anything in a real deployment
+(there is no MAJOR bump yet to differ against) — it is a ceiling for a future
+MAJOR bump, proven with a synthetic fixture in this pack's own test suite.
+
+A hard block is only as trustworthy as what feeds it, so unlike A/B/C above,
+Part D deliberately does NOT read a peer's version from `.presence` (round-9,
+2026-08-10, Cipher HIGH — see the 1.5.0 changelog entry above for the
+live-demonstrated exploit). Instead:
+  - **Signed source.** `heartbeat.sh`'s routine `HEARTBEAT` append now embeds
+    `PROTOCOL-VERSION: X.Y.Z` in its already-signed body. For each peer, this
+    check collects EVERY message (within a bounded recent-window scan —
+    several `HEARTBEAT` cycles' worth, not an unbounded full-history rewalk
+    every commit) that carries this field AND verifies cleanly against
+    `allowed_signers`, via `coord-verify.sh`'s own engine — never a second,
+    parallel verification path. The window itself is chosen from CLASSIFIED
+    content, not a raw line count — see the round-12 bullet below.
+  - **No arbitration — block on ANY incompatible claim (round-11,
+    2026-08-10, Cipher HIGH — the third distinct way "which claim is
+    authoritative" was gamed).** This gate used to pick a single "current"
+    claim — first the peer's `.presence` value (round 8, unsigned,
+    forgeable), then the last-verified claim by an unscoped byte range
+    (round 9), then the last-verified claim by file position (round 10,
+    fixed round-9's scoping gap but not the underlying approach). Round 10's
+    fix still let a coord-dir-write-level attacker with ZERO signing key
+    physically reorder two of a peer's OWN, genuinely, honestly signed
+    historical `HEARTBEAT`s — no forgery, not one byte inside either message
+    touched, both independently still `VERIFIED` — and flip which one a
+    "most recent wins" rule treated as current, in either direction (mask a
+    real mismatch, or fabricate a false one from stale history). The attack
+    precondition — a peer having 2+ genuinely different historical version
+    claims in the tail window — is not an edge case: it is the literal shape
+    of a genuine version transition, the exact event this gate exists to
+    catch. Round-11 stops picking a winner entirely: it blocks if ANY
+    verified claim in the tail window has an incompatible MAJOR, and lists
+    every incompatible claim found, not just one. **Accepted tradeoff:**
+    immediately after a genuine, deliberate MAJOR transition, a peer's own
+    past incompatible claim can still sit in the tail window until enough
+    newer content ages it out — a brief, self-resolving false-positive
+    block. Deliberately preferred over any scheme that re-introduces a
+    "pick the winner" step: MAJOR bumps are rare (nothing shipped
+    1.1.0-1.5.0 has ever been one) and deliberate; "briefly noisy right
+    after an expected rare transition" is a categorically safer failure
+    mode than "an attacker with no signing key decides which of a peer's
+    own real, honest claims counts."
+  - **Window selection anchored on verified spans, not raw lines
+    (round-12, 2026-08-10, Cipher HIGH — a fourth distinct way this gate's
+    inputs were gamed).** Round-11 stopped arbitrating WHICH claim wins, but
+    the tail window feeding that collection was still plain `coord-verify.sh
+    --tail N` — a RAW LINE COUNT, computed before any signature
+    classification. A coord-dir-write attacker with ZERO signing key can
+    append any number of unsigned messages shaped to match the dead-man
+    alarm's own documented `--strict` exemption (tag starting `⚠️ `, body's
+    first line the exact `[SIGNING-FAILED — ...]` sentinel — that exemption
+    checks SHAPE only, never that `heartbeat.sh` itself produced it or that a
+    real signing failure occurred). Each one is legitimately non-fatal under
+    `--strict`, working exactly as that exemption is meant to, while ALSO
+    counting as a raw line toward `--tail`'s eviction boundary — enough of
+    them pushes a peer's real, currently-true, genuinely signed+verified
+    incompatible claim out of the window entirely, so this gate sees "0 with
+    a verified claim" instead of the real one. One-directional only (can
+    hide a real mismatch, never fabricate a fake one), but that is this
+    gate's single worst-case failure. Fix: `coord-verify.sh --tail-verified
+    N` computes its window boundary from CLASSIFIED content — the last N
+    message spans that actually verify — never a raw line count, so unsigned
+    padding of any shape (including all three `--strict` exemption shapes)
+    is skipped "for free" and cannot consume any of that budget. Same
+    structural principle as round-10's `--extract-field` fix (scope to
+    signed bytes, never a second raw scan), applied one layer up: to window
+    selection instead of field extraction.
+  - **Accepted characteristic — unbounded scan cost (Cipher HIGH finding,
+    2026-08-10, reviewed with the human — not fixed).** `--tail-verified`'s
+    classify-then-slice approach has unbounded worst-case cost relative to
+    file size: finding the last N verified spans can require classifying
+    (crypto-verifying) arbitrarily much of a file, since verified-message
+    density can't be known in advance. No cap — capping naively (stopping
+    the classify pass early) would reopen round-12's exact masking bug for
+    whatever content falls past the cap. A very large or heavily-padded
+    peer mailbox file makes check 1d's pass over that peer proportionally
+    slower. This is accepted for this deployment model rather than fixed
+    with a bounded-scan mechanism: this framework runs on the human's own
+    private infrastructure between their own agent sessions, not a public/
+    multi-tenant service — an actor who already has coord-dir write access
+    to deliberately pad a peer's file purely to slow down a git commit has
+    far more damaging options available at that point.
+  - **Peer set.** Enumerated from `allowed_signers` (the actual
+    enrolled-identity trust root) rather than local mailbox-file presence —
+    comma-separated principal lists on one line (a hand-edited-only shape;
+    every tool-written line is one bare identity) are split before
+    enumeration, so one shared line correctly yields every principal on it —
+    an attacker cannot rename their way out of being enrolled the way a
+    mailbox-file-shaped exclusion list could be evaded, and an archived/
+    rotated seat (`<id>.md` → `<id>.archive.md`, an ordinary lifecycle
+    event) stays enrolled and is still enumerated and counted — see the
+    next bullet for what actually happens to it (skipped, not blocked; a
+    rotated seat has no live file left to find a verified claim in).
+  - **Fail-open on absence, never on unknown.** A peer with no verified
+    `PROTOCOL-VERSION` claim yet (new peer, pre-1.5.0 history, or an
+    archived seat whose only claim now lives in a file `coord-verify.sh`'s
+    structural FROM==basename(file) check can never verify — see that
+    script's own header) is skipped, not blocked. A seat whose OWN
+    `PROTOCOL_VERSION` reads `"unknown"` (a partial/incomplete framework
+    copy missing its `PROTOCOL-VERSION` file) skips the whole gate with a
+    loud `WARN`, rather than false-blocking every peer, every commit,
+    forever, on not knowing its own version.
+  - **Remote-seat ceiling.** This gate is LOCAL-channel only, same as Part B.
+    Unlike Part B, this is not "presence isn't reachable remotely" — a
+    remote seat's presence sidecar IS already reachable today via
+    `remote_sweep_script`'s existing `PRES <name> <mtime>` records (see
+    `advanced/REMOTE-SEATS.md`). This round deliberately does not wire
+    check 1d to the remote channel anyway: doing so would mean re-opening
+    the remote-script surface rounds 5-6 spent hardening against RCE, for a
+    hard-block gate that (per the signed-source requirement above) would
+    need the SAME heavier verified-HEARTBEAT-lookup treatment remotely,
+    not presence — a larger, separate piece of work, explicitly out of
+    scope for this round. A remote seat's MAJOR mismatch is therefore not
+    caught by this gate today; see `advanced/REMOTE-SEATS.md` § Protocol
+    Version Handshake (Remote Ceiling) for the accepted ceiling this leaves.
+  - **Accepted ceiling — dedup-state pre-seeding (Cipher LOW, round-9).**
+    Part B's dedup state file (`protocol-version.<peer>.state`) records the
+    LAST alerted `(their-version:my-version)` pair; someone with coord-dir
+    write access could pre-seed that file with the CURRENT real mismatch to
+    suppress the one legitimate alert for it. This is accepted, not fixed:
+    the same write access already lets that actor do far more directly (edit
+    `allowed_signers`, mailbox files, or `PROTOCOL-VERSION` itself), Part B
+    is advisory-only (nothing it gates is security-relevant — see above),
+    and Part D's own hard-block gate does not use this state file at all, so
+    pre-seeding it cannot suppress or fabricate a MAJOR-mismatch commit
+    block.
+
 ---
 
 ## Bootstrap Checklist
@@ -521,10 +803,15 @@ Run these steps in order when standing up a new dual session.
 [ ] 4. M4: read it back — confirm it landed.
 [ ] 4b. PROTOCOL 1.4.0 — if this identity was pre-assigned (skipped the Identity
          Bootstrap handshake, so nobody has generated/enrolled a key for it yet),
-         generate + hand the pubkey to the Orchestrator to enroll:
+         generate + hand the pubkey to the Orchestrator to enroll. PROTOCOL 1.5.0
+         §3.5 Part A: include your own PROTOCOL-VERSION alongside the pubkey — same
+         two-directional exchange as the --provision path, just carried by hand:
            LINE=$(./coord-keygen.sh --generate --identity impl-<name> --dir <coord-dir>)
-           # send $LINE to the Orchestrator (HEADS-UP), who runs:
+           MYVER=$(. ./PROTOCOL-VERSION; echo "$PROTOCOL_VERSION")
+           # send $LINE and "PROTOCOL-VERSION: $MYVER" to the Orchestrator (HEADS-UP), who runs:
            #   ./coord-keygen.sh --enroll --identity impl-<name> --pubkey-line "$LINE" --dir <coord-dir>
+           # and replies with their own PROTOCOL-VERSION (mismatch note if it differs
+           # — see § Protocol Version Handshake — never blocks this step either way).
          (If this identity WAS bootstrapped via --provision/--adopt, this already
          happened as part of that handshake — skip.)
 [ ] 5. Arm coord-monitor.sh via your harness's output→chat bridge
@@ -654,14 +941,34 @@ C. PROTOCOL 1.4.0: enroll the pubkey from the HEADS-UP body under the **assigned
    ```bash
    ./coord-keygen.sh --enroll --identity impl-alpha --pubkey-line "<pubkey: line from the HEADS-UP>" --dir <coord-dir>
    ```
-D. Reply in `orchestrator.md` with `🤝 ASSIGN-IDENTITY` addressed to `pending-<uuid>`:
+D. Reply in `orchestrator.md` with `🤝 ASSIGN-IDENTITY` addressed to `pending-<uuid>`.
+   **PROTOCOL 1.5.0 §3.5 Part A:** carry your own `PROTOCOL-VERSION` back —
+   this exchange is two-directional (the newborn already announced its own
+   in the HEADS-UP body). If it differs from the newborn's, say so plainly
+   in one line, using the SAME wording `coord-presence.sh`'s
+   `protocol_mismatch_message()` produces (severity + remediation — see
+   § Protocol Version Handshake below) — never hand-write a different
+   phrasing that could drift from what the automated re-arm-time check
+   (Part B) says for the same mismatch. **Never block adoption over a
+   version difference alone** — enrollment proceeds exactly as it would on
+   a match.
    ```
    ### <UTC> — orchestrator → pending-<uuid> — 🤝 ASSIGN-IDENTITY
 
    You are: impl-alpha
    Unique in <coord-dir>/ at time of assignment.
    Pubkey enrolled under impl-alpha (PROTOCOL 1.4.0).
+   PROTOCOL-VERSION: <own current version, e.g. $MYVER from step 4b — never hand-type a literal, it goes stale at the next bump>
    Adopt: bootstrap-identity.sh --adopt. Re-arm watcher. Reply with ACK.
+   ```
+   If versions differ, append the mismatch note (example — MINOR/PATCH shown;
+   see § Protocol Version Handshake for the MAJOR wording, which additionally
+   states this will block hub commits):
+   ```
+   PROTOCOL-VERSION mismatch: pending-<uuid> is running 1.4.0; orchestrator is running 1.5.0.
+   Severity: MINOR/PATCH — additive/backward-compatible or non-semantic. No functional break; upgrade at your convenience, this is advisory only.
+   If you share a repo checkout with the other side (the common, zero-cost case): git pull the coordination-protocol, then re-arm your watcher/heartbeat. If this is instead a cross-repo/remote-seat topology, ask your Orchestrator/human where the canonical framework repo lives (set COORD_CANONICAL_SOURCE to point at it directly next time).
+   This is a pointer, not a payload — no file content, diff, or script is embedded here.
    ```
    This reply itself may read UNVERIFIED under `coord-verify.sh --strict` — it is
    the second bootstrap-exempt shape (FROM orchestrator, TAG ASSIGN-IDENTITY);
@@ -843,14 +1150,14 @@ Lossless-mandate WOs inherit this proving standard automatically (see WORK-ORDER
 |------|---------|
 | `PROTOCOL-VERSION` | Single stamp shared by docs + scripts (`PROTOCOL_VERSION=…`) — bump on every amendment |
 | `coord-address-filter.sh` | Project-scope helpers (`spoke_filter_delta`, `protocol_project_of_identity`, …) |
-| `coord-presence.sh` | `.presence/<id>` sidecar read/write (Phase 4) |
+| `coord-presence.sh` | `.presence/<id>` sidecar read/write (Phase 4). PROTOCOL 1.5.0: also carries the shared Protocol Version Handshake helpers (`protocol_version_major`/`protocol_mismatch_severity`/`protocol_mismatch_message`) — see § Protocol Version Handshake |
 | `IDLE-SCHEDULE-template.md` | Per-seat idle activity schedule for `heartbeat --schedule-file` |
 | `SOLO.md` | Solo protocol stub |
 | `advanced/MULTI-ORCHESTRATOR.md` | Design memo only — multi-hub options |
-| `coord-monitor.sh` | Persistent STAR monitor — project watch/filter (1.3.0); presence sidecar PID write; PROTOCOL stamp on arm. Remote channel (`--remote-host`): ssh-fetch-verify-annotate on arrival + auto-writes `<coord-dir>/.remote-channels` on arm — see `advanced/REMOTE-SEATS.md` § Message Authenticity |
+| `coord-monitor.sh` | Persistent STAR monitor — project watch/filter (1.3.0); presence sidecar PID write; PROTOCOL stamp on arm. Remote channel (`--remote-host`): ssh-fetch-verify-annotate on arrival + auto-writes `<coord-dir>/.remote-channels` on arm — see `advanced/REMOTE-SEATS.md` § Message Authenticity. PROTOCOL 1.5.0: LOCAL-channel arm also checks each known peer's presence `protocol_version` against its own and posts a deduped `⚠️ PROTOCOL-VERSION-MISMATCH` alert on a genuine mismatch — see § Protocol Version Handshake |
 | `coord-send.sh` | The publish half of the coordination chat-room — auto-fills timestamp/identity/header, appends atomically to your own outbox, reads the append back to verify it landed; named args `--to`/`--tag`/`--subject`/`--body`/`--body-file`. `--remote-seat`/`COORD_REMOTE_SEAT=1` (MANDATORY-EXPLICIT): skips the local enrollment readback-verify for a bus dir with no local `allowed_signers` by design — see `advanced/REMOTE-SEATS.md` § Message Authenticity |
 | `coord-status.sh` | Read-only liveness — local (+ remote) watcher pidfiles and heartbeat; ALL-CHANNELS aware; portable coord-dir default |
-| `heartbeat.sh` | IDLE-KICK (`--idle-policy`) + Orchestrator discover-on-idle (folded into IDLE-KICK body) + HOLD-DAMP-V2 + `--weak-seat` + ALL-CHANNELS watcher dead-man (`exit 42`); portable `--dir` |
+| `heartbeat.sh` | IDLE-KICK (`--idle-policy`) + Orchestrator discover-on-idle (folded into IDLE-KICK body) + HOLD-DAMP-V2 + `--weak-seat` + ALL-CHANNELS watcher dead-man (`exit 42`); portable `--dir`. PROTOCOL 1.5.0: routine `HEARTBEAT` append embeds `PROTOCOL-VERSION` — the signed source `coordination-precommit-hook.sh`'s protocol-version gate reads (round-9) — see § Protocol Version Handshake |
 | `coord-protocol-metrics.sh` | Shared helpers sourced by `coord-status.sh` / `heartbeat.sh` — queue depth per queue file, `PROTOCOL-VERSION` stamp, ratified-but-unimplemented amendment count, migration-chain state. Standalone-runnable for a one-shot dump |
 | `coord-session-healthcheck.sh` | The third clock — session-external (cron/launchd). Alerts only when BOTH no coord-dir write AND no commit/worktree touch over `--window`; repeatable `--repo` (no default project paths) |
 | `coord-evidence-lint.sh` | Evidence-presence lint for mailboxes — flags a completion/state claim with no adjacent output-shaped evidence. Ceiling: presence, not truth |
@@ -861,11 +1168,11 @@ Lossless-mandate WOs inherit this proving standard automatically (see WORK-ORDER
 | `WORK-ORDER-template.md` | WO format (full + one-liner tiers) and STATUS reply |
 | `ROSTER-template.md` | Presence file schema (M9 richer fields); registration and deregistration |
 | `QUEUE-template.md` | Claimable queue, three-bucket SSOT, depth-floor, push-assignment rules; in multi-project deployments, instantiate one queue per downstream repo (`queue-<repo>.md`) — see § Multi-project coordination |
-| `coordination-precommit-hook.sh` | PreToolUse hook for git commit-landing verbs (`commit`/`merge`/`cherry-pick`/`rebase`/`am`/`revert`/`pull`) and `push`: mailbox-read gate (Rule 4), dangerous-verb warning (`add -A`/`add .`/`commit -a`), non-blocking secret-scan, git-anchored sig-verify (`COORD_REMOTE_SEAT_HOOK=1` explicit escape for a remote seat running this hook against its own bus-dir-as-coord-dir), `allowed_signers` write gate, remote-channel sig-verify (reads `.remote-channels`; every remote value goes through `coord-remote-verify.sh`'s `coord_remote_shquote` before being spliced into an ssh command — round-5, 2026-08-09, closed a live-demonstrated RCE; always prints which channel(s) it checked, even zero, and fails closed on an unreachable host or a live remote watcher with no configured channel — see `advanced/REMOTE-SEATS.md` § Round-5 hardening); supports both the Claude Code JSON-stdin tool-input protocol and the Cursor `beforeShellExecution` allow/deny contract. Bash-command-text matcher, not a real git hook — see § Hard-block for the stated ceiling |
+| `coordination-precommit-hook.sh` | PreToolUse hook for git commit-landing verbs (`commit`/`merge`/`cherry-pick`/`rebase`/`am`/`revert`/`pull`) and `push`: mailbox-read gate (Rule 4), dangerous-verb warning (`add -A`/`add .`/`commit -a`), non-blocking secret-scan, git-anchored sig-verify (`COORD_REMOTE_SEAT_HOOK=1` explicit escape for a remote seat running this hook against its own bus-dir-as-coord-dir), `allowed_signers` write gate, remote-channel sig-verify (reads `.remote-channels`; every remote value goes through `coord-remote-verify.sh`'s `coord_remote_shquote` before being spliced into an ssh command — round-5, 2026-08-09, closed a live-demonstrated RCE; always prints which channel(s) it checked, even zero, and fails closed on an unreachable host or a live remote watcher with no configured channel — see `advanced/REMOTE-SEATS.md` § Round-5 hardening), PROTOCOL 1.5.0 protocol-version MAJOR-mismatch gate (FAIL on a peer's MAJOR version, sourced from their own signed+verified HEARTBEAT and enumerated via `allowed_signers` — round-9 hardened against presence forgery — differing from this seat's own; MINOR/PATCH never block, see § Protocol Version Handshake); supports both the Claude Code JSON-stdin tool-input protocol and the Cursor `beforeShellExecution` allow/deny contract. Bash-command-text matcher, not a real git hook — see § Hard-block for the stated ceiling |
 | `retired/` | Tombstones only — retired watcher/hook **scripts were deleted** (git history retains bodies). See `retired/README.md`. Do not resurrect. |
-| `bootstrap-identity.sh` | DESIGN EXTENSION: provisional-ID generation (`--provision`) and identity adoption (`--adopt`) for the naming handshake; see § Identity Bootstrap. PROTOCOL 1.4.0: also generates/embeds and carries over the signing key. |
+| `bootstrap-identity.sh` | DESIGN EXTENSION: provisional-ID generation (`--provision`) and identity adoption (`--adopt`) for the naming handshake; see § Identity Bootstrap. PROTOCOL 1.4.0: also generates/embeds and carries over the signing key. PROTOCOL 1.5.0: HEADS-UP also embeds `PROTOCOL-VERSION` alongside the pubkey — see § Protocol Version Handshake. |
 | `coord-keygen.sh` | PROTOCOL 1.4.0: SSH signing-key lifecycle — `--generate`/`--enroll`/`--rotate`/`--fingerprint`. Sourceable (key-path helpers only) by `coord-send.sh` / `bootstrap-identity.sh`. See § Message Authenticity (SSH signing) |
-| `coord-verify.sh` | PROTOCOL 1.4.0: verifies mailbox message signatures against `allowed_signers` — `--tail`/`--since-line`/`--strict`/`--find-boundary`; the three exemptions are documented in its own header comment |
+| `coord-verify.sh` | PROTOCOL 1.4.0: verifies mailbox message signatures against `allowed_signers` — `--tail`/`--since-line`/`--strict`/`--find-boundary`/`--extract-field`/`--tail-verified`; the three exemptions are documented in its own header comment. `--tail-verified N` (round-12, 2026-08-10) selects its window from CLASSIFIED content — the last N spans that actually verify — rather than a raw line count, so unsigned padding cannot evict a real claim; classifying that window has unbounded worst-case cost relative to file size, an accepted characteristic (no cap — see § Protocol Version Handshake, Part D) |
 | `coord-remote-verify.sh` | PROTOCOL 1.4.0 remote-seat extension: shared `verify_remote_buffer` helper — writes an ssh-fetched buffer to a correctly-named local temp file and runs `coord-verify.sh` against it with `--dir` pointed at the hub's own local `allowed_signers`. Also carries `coord_remote_shquote` (round-5, 2026-08-09): POSIX single-quote escaping for any value spliced into a remote ssh command string — a HARD dependency for `coord-monitor.sh --remote-host` (refuses to arm without it) after a live-demonstrated command-injection finding via an unescaped remote filename. Sourced by both `coord-monitor.sh`'s remote channel and `coordination-precommit-hook.sh`. See `advanced/REMOTE-SEATS.md` § Message Authenticity |
 | `allowed_signers` | PROTOCOL 1.4.0: the trust root — OpenSSH allowed_signers format, one line per identity's public key. Orchestrator-only single-writer (same pattern as `QUEUE.md`, M7). Committed/shared — public keys only, Rule-5-safe |
 | `advanced/sqlite-mcp.README.md` | Optional advanced path: SQLite(WAL) + stdio-MCP for atomic claim (M6) — design sketch; align to persistent `coord-monitor.sh`, not the retired one-shot watcher |

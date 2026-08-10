@@ -180,6 +180,8 @@ TAIL_N=0
 SINCE_LINE=0
 STRICT=0
 FIND_BOUNDARY=""
+EXTRACT_FIELD=""
+TAIL_VERIFIED_N=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -189,13 +191,50 @@ while [[ $# -gt 0 ]]; do
     --since-line) SINCE_LINE="$2"; shift 2 ;;
     --strict) STRICT=1; shift ;;
     --find-boundary) FIND_BOUNDARY="$2"; shift 2 ;;
+    --extract-field) EXTRACT_FIELD="$2"; shift 2 ;;
+    --tail-verified) TAIL_VERIFIED_N="$2"; shift 2 ;;
     -h|--help)
       cat <<'USAGE'
 Usage: coord-verify.sh --dir <coord-dir> --file <mailbox-file> [--tail N] [--since-line N] [--strict]
   --dir <coord-dir>   location of allowed_signers (the trust root)
   --file <mailbox.md> file to scan for message + SIG blocks
-  --tail N            only consider message headers within the last N lines
+  --tail N            only consider message headers within the last N RAW
+                       LINES of the file, before any signature classification
+                       — a coord-dir-write-level attacker with no signing key
+                       can pad a file with any number of unsigned/exempt
+                       lines to evict an older, still-relevant VERIFIED
+                       header from this window (round-12, 2026-08-10, Cipher
+                       HIGH; see --tail-verified below for the anchored
+                       alternative). Mutually exclusive with --tail-verified.
   --since-line N       only consider message headers on lines > N
+  --tail-verified N    only consider the last N message spans that actually
+                       classify as VERIFIED (plus whatever UNVERIFIED/exempt/
+                       UNKNOWN-SIGNER/INVALID spans happen to fall after that
+                       Nth-from-end VERIFIED one) — the window boundary is
+                       chosen from CLASSIFIED content, never a raw line
+                       count, so unsigned padding (including all three
+                       --strict exemption shapes) cannot push a real VERIFIED
+                       claim out of the window: it is skipped "for free"
+                       instead of counting toward N. Round-12 (2026-08-10,
+                       Cipher HIGH) fix for the exact gap --tail's raw-line
+                       window has; same principle as --extract-field's
+                       signed-bytes-only scoping, applied to window selection
+                       instead of field extraction. Mutually exclusive with
+                       --tail (an unbounded classify-then-slice pass is
+                       required to find the Nth VERIFIED span, so combining
+                       the two has no coherent meaning). May be combined with
+                       --since-line, which still applies as a structural
+                       floor on which headers are classified at all.
+                       Accepted characteristic (not a bug — see README.md §
+                       Protocol Version Handshake, Part D's ceiling notes):
+                       finding N verified spans has unbounded worst-case
+                       cost relative to file size (no cap — capping naively
+                       would reopen the round-12 masking bug this flag
+                       exists to fix). A very large or heavily-padded peer
+                       mailbox file makes this proportionally slower. This
+                       framework runs on private infrastructure between a
+                       human's own agent sessions, not a public/multi-tenant
+                       service.
   --strict             also fail on non-exempt UNVERIFIED and on
                         UNKNOWN-SIGNER (see header comment for the three
                         exempt shapes that never fail)
@@ -207,6 +246,18 @@ Usage: coord-verify.sh --dir <coord-dir> --file <mailbox-file> [--tail N] [--sin
                        at all (used by coordination-precommit-hook.sh — see
                        its receipt-forgery hardening). Mutually exclusive
                        with a normal verify run.
+  --extract-field NAME  for every VERIFIED message, if a line matching
+                       "NAME: <value>" appears WITHIN signed_region (the
+                       exact bytes this script verified against — never a
+                       second, independent raw-file scan), print an extra
+                       "FIELD-VERIFIED <frm> <ts> <value>" line. Content
+                       appended after a message's own SIG block (or
+                       otherwise outside what was cryptographically checked)
+                       can never produce a FIELD-VERIFIED line, by
+                       construction — round-10 (2026-08-10, Cipher HIGH):
+                       this closes the exact gap a raw-file-scan-then-
+                       match-back approach could not (round-9's original
+                       fix moved the hole, not closed it).
 Exit 0 = clean. Non-zero iff any INVALID, or (--strict) any non-exempt
 UNVERIFIED or any UNKNOWN-SIGNER.
 USAGE
@@ -218,6 +269,10 @@ done
 
 if [[ -z "$DIR" || -z "$FILE" ]]; then
   echo "ERROR [coord-verify]: --dir and --file are required." >&2
+  exit 2
+fi
+if [[ "$TAIL_N" != "0" && "$TAIL_VERIFIED_N" != "0" ]]; then
+  echo "ERROR [coord-verify]: --tail and --tail-verified are mutually exclusive (see --help)." >&2
   exit 2
 fi
 if [[ ! -f "$FILE" ]]; then
@@ -246,7 +301,7 @@ if [[ -n "$_ssh_ver" ]]; then
 fi
 unset _ssh_ver _ssh_major _ssh_minor
 
-python3 - "$FILE" "$DIR" "$TAIL_N" "$SINCE_LINE" "$STRICT" "$FIND_BOUNDARY" <<'PY'
+python3 - "$FILE" "$DIR" "$TAIL_N" "$SINCE_LINE" "$STRICT" "$FIND_BOUNDARY" "$EXTRACT_FIELD" "$TAIL_VERIFIED_N" <<'PY'
 import sys, os, re, subprocess, tempfile
 
 file_path, coord_dir = sys.argv[1], sys.argv[2]
@@ -254,6 +309,9 @@ tail_n = int(sys.argv[3])
 since_line = int(sys.argv[4])
 strict = sys.argv[5] == "1"
 find_boundary_n = int(sys.argv[6]) if len(sys.argv) > 6 and sys.argv[6] != "" else None
+extract_field = sys.argv[7] if len(sys.argv) > 7 and sys.argv[7] != "" else None
+extract_field_re = re.compile(r'^' + re.escape(extract_field) + r': (.*)$') if extract_field else None
+tail_verified_n = int(sys.argv[8]) if len(sys.argv) > 8 and sys.argv[8] != "" else 0
 
 allowed_signers = os.path.join(coord_dir, "allowed_signers")
 allowed_signers_present = os.path.isfile(allowed_signers)
@@ -285,6 +343,13 @@ for i, bl in enumerate(raw_lines):
         header_idxs.append(i)
 
 start_idx = 0
+# ROUND-12 (2026-08-10, Cipher HIGH): --tail's raw-line start_idx is deliberately
+# NOT applied when --tail-verified is in play — that would reintroduce the exact
+# raw-line eviction gap --tail-verified exists to close (an attacker could still
+# use unsigned padding to push start_idx itself past a real VERIFIED header
+# before classification ever runs). --since-line stays a valid structural floor
+# either way; it restricts by document position, not by a count an attacker's
+# unsigned padding can inflate.
 if tail_n > 0:
     start_idx = max(start_idx, n_lines - tail_n)
 if since_line > 0:
@@ -596,7 +661,7 @@ for hi, span in consumed_walk(relevant):
             verdict = "INVALID"
             note = f" [FROM/file mismatch: claims FROM={frm} but resides in {file_basename}.md — single-writer-per-file violation]" + bytes_note
 
-        results.append((verdict, frm, ts, tag, False, note))
+        results.append((verdict, frm, ts, tag, False, note, signed_region if verdict == "VERIFIED" else None))
     else:
         verdict = "UNVERIFIED"
         # STRUCTURAL CHECK, unsigned path: FROM == basename(file) is
@@ -611,14 +676,62 @@ for hi, span in consumed_walk(relevant):
                 exempt = True
             elif tag.startswith("⚠️ ") and body_starts_with_sentinel(hi):
                 exempt = True
-        results.append((verdict, frm, ts, tag, exempt, ""))
+        results.append((verdict, frm, ts, tag, exempt, "", None))
+
+# ROUND-12 (2026-08-10, Cipher HIGH): --tail-verified's window boundary is
+# chosen HERE, from `results` — every header in `relevant` has already been
+# fully classified above — never from a raw line count computed before
+# classification (that was the round-12 gap in plain --tail: unsigned
+# padding, including all three --strict exemption shapes, counts toward a
+# raw-line budget it should never be able to spend). Walk `results`
+# (ascending file-order, same order coord-verify.sh has always printed in)
+# backward from EOF, counting only VERIFIED spans, until N are found or the
+# start is reached; UNVERIFIED/exempt/UNKNOWN-SIGNER/INVALID spans in
+# between are skipped "for free" — they never consume any of the N budget,
+# so no amount of unsigned padding can push a real VERIFIED span out of the
+# window. If fewer than N VERIFIED spans exist at all, the boundary is the
+# start of `relevant` — i.e. everything classified above is kept, same
+# fail-open-on-absent-data posture --tail already has.
+#
+# Accepted characteristic, not a bug (2026-08-10, per the human, on review
+# of a round-13 finding): classifying `relevant` above has unbounded
+# worst-case cost relative to file size — no cap, since capping naively
+# (stopping the classify pass early) would reopen this exact masking bug
+# for whatever content falls past the cap. A very large or heavily-padded
+# peer mailbox file makes this proportionally slower. Not fixed: this
+# framework runs on the human's own private infrastructure between their
+# own agent sessions, not a public/multi-tenant service — an actor who
+# already has coord-dir write access to deliberately pad a peer's file
+# purely to slow down a git commit has far more damaging options available
+# at that point; see README.md § Protocol Version Handshake, Part D.
+if tail_verified_n > 0:
+    _tv_boundary = 0
+    _tv_seen = 0
+    for _tv_idx in range(len(results) - 1, -1, -1):
+        if results[_tv_idx][0] == "VERIFIED":
+            _tv_seen += 1
+            if _tv_seen >= tail_verified_n:
+                _tv_boundary = _tv_idx
+                break
+    results = results[_tv_boundary:]
 
 counts = {"VERIFIED": 0, "UNVERIFIED": 0, "INVALID": 0, "UNKNOWN-SIGNER": 0}
 fail = False
-for verdict, frm, ts, tag, exempt, note in results:
+for verdict, frm, ts, tag, exempt, note, signed_region in results:
     counts[verdict] += 1
     if verdict == "VERIFIED":
         print(f"✅ VERIFIED {frm} {ts}{note}")
+        # ROUND-10 (2026-08-10, Cipher HIGH): scan ONLY signed_region — the
+        # exact bytes ssh-keygen -Y verify just checked above — never the
+        # raw file. Content appended after this message's own SIG block (or
+        # anywhere else outside signed_region) structurally cannot produce a
+        # FIELD-VERIFIED line, no matter how it's shaped or where it sits.
+        if extract_field_re is not None and signed_region is not None:
+            for line in signed_region.decode("utf-8", errors="replace").split("\n"):
+                fm = extract_field_re.match(line.rstrip("\r"))
+                if fm:
+                    print(f"FIELD-VERIFIED {frm} {ts} {fm.group(1)}")
+                    break
     elif verdict == "UNVERIFIED":
         exempt_note = " [exempt]" if exempt else ""
         print(f"⚠️ UNVERIFIED (no signature) {frm} {ts}{exempt_note}")

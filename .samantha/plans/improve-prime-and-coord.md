@@ -1,7 +1,7 @@
 # Plan: Coordination as skill-based modes (Solo + Star)
 
 Status: **PHASE 5 (rollout) DONE on disk** · seats need **re-arm** · **still no git push**  
-PROTOCOL **1.4.0**
+PROTOCOL **1.5.0**
 
 ## Phases
 
@@ -28,6 +28,7 @@ Re-arm each Nebuspace seat per `ROLLOUT-PROTOCOL-1.3.0.md`. Confirm banner `PROT
 ## Shipped since
 
 - **SSH message authenticity** — shipped in PROTOCOL 1.4.0 (2026-08-09): `coord-keygen.sh` / `coord-verify.sh`, `coord-send.sh` always signs, `coordination-precommit-hook.sh` hard-blocks on invalid/non-exempt-unsigned mail (forward-only), bootstrap key handshake folded into `bootstrap-identity.sh` + the Orchestrator's `ASSIGN-IDENTITY` reply.
+- **Protocol Version Handshake** — shipped in PROTOCOL 1.5.0 (2026-08-10): bootstrap-time two-directional `PROTOCOL-VERSION` exchange (`bootstrap-identity.sh` HEADS-UP + the Orchestrator's `ASSIGN-IDENTITY` reply), re-arm-time peer-staleness detection in `coord-monitor.sh` (deduped `⚠️ PROTOCOL-VERSION-MISMATCH` alert, same pattern as `SEAT STALE`), a self-upgrade pointer (never a push — `git pull` for local/shared-repo, `COORD_CANONICAL_SOURCE` for cross-repo/remote-seat), and real MAJOR/MINOR/PATCH severity with a `coordination-precommit-hook.sh` hard-block on a MAJOR mismatch only.
 
 ## Still deferred
 

@@ -604,6 +604,15 @@ append_heartbeat() {
     fi
     printf 'Alive. Watcher %s OK. Own file idle for >= %ss (actual ~%ss).\n\n' \
       "$watcher_pid_str" "$IDLE_THRESHOLD" "$idle_s"
+    # PROTOCOL 1.5.0 §3.5 Part D (round-9, 2026-08-10, Cipher HIGH): the ONLY
+    # signed-and-verifiable source coordination-precommit-hook.sh's check 1d
+    # trusts for a peer's protocol version — unlike the unsigned .presence
+    # sidecar (coord-dir-write-level forgeable, no ownership enforcement),
+    # this line lives inside the SAME already-signed HEARTBEAT body, so a
+    # forged claim would have to forge the whole signature. Own line, own
+    # prefix (`PROTOCOL-VERSION: `) so check 1d's scan can find it reliably
+    # regardless of surrounding body text.
+    printf 'PROTOCOL-VERSION: %s\n\n' "$PROTOCOL_VERSION"
     printf '⚡ **IDLE-KICK** — you have been quiet. Mid-task → CONTINUE where you left off (do not idle between steps). Queue/lane empty → start idle work NOW:\n\n'
     printf '> %s\n\n' "$IDLE_POLICY"
     printf 'Do **not** answer with "standing by" / "no action" and stop. Post a 🛰️ HEADS-UP naming the next target, then build. (coord-monitor self-nudge delivers this wake; peers also see the HEARTBEAT.)\n\n'
