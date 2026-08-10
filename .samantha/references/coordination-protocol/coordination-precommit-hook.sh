@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# coordination-precommit-hook.sh — PreToolUse hook for git commit and push.
+# coordination-precommit-hook.sh — PreToolUse hook for git commit-landing and push verbs.
 #
 # PURPOSE:
-#   Enforces coordination hygiene before any git commit or push in a dual-mode session:
+#   Enforces coordination hygiene before any git commit-landing verb (commit, merge,
+#   cherry-pick, rebase, am, revert, pull) or push in a dual-mode session:
 #   1. MAILBOX-READ GATE: Check that no unread message is addressed to this instance.
 #      (Rule 4: read your mailbox before any commit/push/deploy.)
 #   2. DANGEROUS-VERB WARNING: Warn if `git add -A` or `git add .` was used in a shared tree.
@@ -26,7 +27,11 @@
 #     }
 #
 #   The hook fires for every Bash tool call. The script self-filters: it only runs its checks
-#   if the Bash command contains "git commit" or "git push".
+#   if the Bash command matches a commit-landing verb (commit, merge, cherry-pick, rebase,
+#   am, revert, pull) or a push (see `_is_commit_landing_cmd`/`_is_push_cmd` below). This is
+#   a Bash-command-TEXT matcher, not a real git hook — see that function's header comment
+#   for the stated ceiling (doesn't protect a human typing git directly in a terminal, can
+#   always miss some future/uncommon verb).
 #
 # USAGE (standalone):
 #   ./coordination-precommit-hook.sh <coord-dir> <my-identity>
@@ -45,6 +50,35 @@ set -euo pipefail
 
 COORD_DIR="${1:-}"
 MY_ID="${2:-}"
+_HOOK_HOME="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)"
+# PROTOCOL 1.4.0: SSH signature verification over newly-read mail (see check 1b below).
+COORD_VERIFY_SH="$_HOOK_HOME/coord-verify.sh"
+# PROTOCOL 1.4.0 remote-seat extension (2026-08-09, real gap 2): shared
+# fetch-a-buffer -> name-it-correctly -> verify-it helper, same one
+# coord-monitor.sh's remote channel uses (see check 1c below) — one
+# definition so the two can never drift on how a remote buffer is verified.
+COORD_REMOTE_VERIFY_SH="$_HOOK_HOME/coord-remote-verify.sh"
+if [[ -f "$COORD_REMOTE_VERIFY_SH" ]]; then
+  # shellcheck source=coord-remote-verify.sh
+  . "$COORD_REMOTE_VERIFY_SH"
+fi
+# PROTOCOL 1.3.0: same-project peer watch-set helpers, shared with coord-monitor.sh
+# (item 9, 2026-08-09: this hook's own inbox set was still 1.2.x-shaped — spoke-only-
+# watches-orchestrator.md — even though spokes have watched same-project peer outboxes
+# since 1.3.0; reusing these helpers instead of re-deriving the rule keeps the two from
+# drifting again).
+COORD_ADDRESS_FILTER_SH="$_HOOK_HOME/coord-address-filter.sh"
+if [[ -f "$COORD_ADDRESS_FILTER_SH" ]]; then
+  # shellcheck source=coord-address-filter.sh
+  . "$COORD_ADDRESS_FILTER_SH"
+fi
+# PROTOCOL 1.4.0: receipt read/write helpers, shared with coord-monitor.sh so
+# the two can never disagree on the receipt format (item 1, 2026-08-09).
+COORD_RECEIPT_SH="$_HOOK_HOME/coord-receipt.sh"
+if [[ -f "$COORD_RECEIPT_SH" ]]; then
+  # shellcheck source=coord-receipt.sh
+  . "$COORD_RECEIPT_SH"
+fi
 # The tool input arrives as JSON on STDIN under the current Claude Code hook
 # protocol ({"tool_name":...,"tool_input":{"command":...}} or a bare tool_input
 # object). The old CLAUDE_TOOL_INPUT env var is honored as a legacy fallback.
@@ -152,12 +186,49 @@ if [[ ${#_bad_patterns[@]} -gt 0 ]]; then
 fi
 unset _bad_patterns _p _rc
 
-# ── self-filter: only run on git commit / git push ────────────────────────────
+# ── self-filter: only run on a commit-landing or push verb ────────────────────
 #
 # SECURITY: fail-closed on ambiguity (N posture).
 # If the command cannot be determined (unparseable JSON, missing parsers), all three
 # checks run rather than silently passing. exit 0 only when the command is positively
-# identified as NOT a commit/push. Ambiguity → checks run; positive non-commit → exit 0.
+# identified as NOT a commit-landing/push verb. Ambiguity → checks run; positive
+# non-commit → exit 0.
+#
+# VERB COVERAGE (round-3, item 1, 2026-08-09 — Cipher CRITICAL, human-directed
+# fix): this used to gate on a literal `*"git commit"*` / `*"git push"*`
+# substring match against the raw Bash command text. Cipher live-confirmed
+# `git merge --no-edit`, `git cherry-pick <sha>`, `git rebase --continue`, and
+# `git am <mbox>` all land a commit object and all return `{"permission":
+# "allow"}` with ZERO checks run — no mailbox-read gate, no git-anchored
+# sig-verify, no allowed_signers write-gate, no secret-scan. These are
+# ordinary, everyday commit-landing verbs, not exotic plumbing; this fully
+# defeated the round-2 hardening on both the git-anchor and the
+# allowed_signers gate with no `--no-verify` or history rewrite needed.
+# `_is_commit_landing_cmd`/`_is_push_cmd` below are the ONE shared classifier
+# every gate in this file uses (the self-filter here, check 4's canon-doc
+# advisory, check 6's allowed_signers gate) — a single definition so they can
+# never drift apart on what counts as "this lands a commit".
+#
+# CEILING (matches this file's/README's established ceiling voice — the
+# allowed_signers direct-filesystem-write admission, the gated-push "does not
+# stop a determined liar" paragraph): this is a Claude-Code-session-scoped
+# Bash COMMAND-TEXT matcher, not equivalent to a real git hook. It does not
+# protect a human typing git commands directly in a terminal (this hook only
+# fires on a Bash tool call inside a hooked session) and a text matcher can
+# always be blindsided by some future/uncommon verb, alias, or wrapper script
+# this list doesn't enumerate — over time this needs its own review as git
+# usage patterns in this project evolve, matching README's own admission for
+# the allowed_signers gate. A durable fix — real `.git/hooks/pre-commit` +
+# `pre-merge-commit` hooks, enforced by git itself regardless of tool/process
+# — is out of scope for 1.4.0; flagged as a future item (see README.md
+# `advanced/REMOTE-SEATS.md` for the same "flagged, not solved this round"
+# treatment of a comparably-scoped gap).
+_is_commit_landing_cmd() {
+  [[ "$1" =~ (^|[^A-Za-z0-9_-])git[[:space:]]+(commit|merge|cherry-pick|rebase|am|revert|pull)([^A-Za-z0-9_-]|$) ]]
+}
+_is_push_cmd() {
+  [[ "$1" == *"git push"* ]]
+}
 
 extract_bash_command() {
   # Extract the "command" field from Claude tool input JSON.
@@ -194,11 +265,18 @@ if [[ -n "$BASH_CMD" ]]; then
   if ! cmd_field=$(extract_bash_command "$BASH_CMD") || [[ -z "$cmd_field" ]]; then
     # Could not determine the command (parse failed, unavailable parsers, or empty result).
     # N posture: run all checks rather than silently allowing. exit 0 only on positive
-    # identification as not-a-commit — never on ambiguity (including missing parsers).
+    # identification as not-a-commit-landing/push verb — never on ambiguity (including
+    # missing parsers).
+    # Round-2 (item 5): every downstream check gates on `_is_commit_landing_cmd`/
+    # `_is_push_cmd` against $cmd_field — the placeholder text must therefore
+    # actually match both classifiers (contain "git commit" and "git push"
+    # literally), or checks 5 and 6 (allowed_signers gate) silently no-op on
+    # ambiguity despite this comment's own stated intent, exactly the failure
+    # mode check 1 above already avoids for the mailbox-read gate.
     echo "WARN [pre-commit hook]: Could not extract command from CLAUDE_TOOL_INPUT — running checks as precaution." >&2
-    cmd_field="(command unknown — checks running as precaution)"
-  elif [[ "$cmd_field" != *"git commit"* && "$cmd_field" != *"git push"* ]]; then
-    emit '{"permission":"allow"}'; exit 0  # Positively not a commit/push — allow.
+    cmd_field="(command unknown — checks running as precaution for git commit / git push)"
+  elif ! _is_commit_landing_cmd "$cmd_field" && ! _is_push_cmd "$cmd_field"; then
+    emit '{"permission":"allow"}'; exit 0  # Positively not a commit-landing/push verb — allow.
   fi
 else
   # Standalone invocation (no CLAUDE_TOOL_INPUT): run all checks.
@@ -210,43 +288,132 @@ FAIL=0
 
 # ── check 1: mailbox-read gate ────────────────────────────────────────────────
 #
-# Per-instance offset file tracks how far into orchestrator.md this agent has
-# acknowledged. File: <coord-dir>/.watch-state/<id>/orchestrator.md.size
-# (byte offset, plain text). This is the SAME file that coord-monitor.sh
-# persists its read-time EOF to on every wake — auto-maintained by the watcher
-# with no manual wc -c step and no drift between watcher state and hook state.
-# Bytes after the stored offset are "unread". We block if any contain a message
-# header addressed to MY_ID OR the broadcast token ALL.
+# Per-instance receipt tracks how far into each inbox file this agent has
+# acknowledged. File: <coord-dir>/.watch-state/<id>/<inbox-file>.size — this is
+# the SAME file coord-monitor.sh persists its read-time state to on every wake
+# (auto-maintained by the watcher, no manual step, no drift between watcher
+# state and hook state). Bytes after the acknowledged offset are "unread". We
+# block if any contain a message header addressed to MY_ID OR the broadcast
+# token ALL.
 #
-# No offset file on first run → auto-initialize at current EOF, so pre-existing
+# No receipt on first run → auto-initialize at current EOF, so pre-existing
 # sibling traffic never blocks a fresh implementer. The watcher auto-advances
-# the offset file on every wake; the hook reads it directly. In standalone mode
+# the receipt on every wake; the hook reads it directly. In standalone mode
 # (no active watcher), initialize manually — see the suggestion printed below.
 #
-# Why offset-file, not "last line I posted in orchestrator.md":
+# Why a receipt file, not "last line I posted in orchestrator.md":
 #   - Implementers NEVER post into orchestrator.md (they post in their own file).
 #     The old grep-for-my-sent-line heuristic always returned 0 for implementers,
 #     marking every message as unread → permanent block on first commit (deadlock).
-#   - The offset file tracks what the agent has actually acknowledged — no
+#   - The receipt tracks what the agent has actually acknowledged — no
 #     inference, no deadlock, no dependency on the watcher being armed first.
 #   - Scanning for "→ ALL" in the delta catches broadcast DEPLOY-WINDOW signals
 #     that the old pattern (→ MY_ID only) silently missed.
-
+#
+# RECEIPT-FORGERY HARDENING (item 1, 2026-08-09; scope narrowed round-2,
+# 2026-08-09): the receipt used to be a bare integer — anything (a bug, a
+# stray `echo 99999 > receipt`, a hand-edit) could set it past real content
+# and silently disable the gate forever, with nothing to detect the forgery.
+# The receipt is now TWO fields (offset=<n> / verified_sha256=<hash of the
+# file's first n bytes>), and a reader recomputes and rejects on mismatch —
+# see coord-receipt.sh's header comment for the exact contract. THIS RECEIPT
+# IS USED ONLY FOR THE MAILBOX-READ NUDGE ABOVE (Rule 4: "have you read your
+# new mail"), which pre-dates this amendment and never claimed to be a
+# security boundary. Round-2 (Cipher): the receipt's hash-binding does not
+# actually add security for anything MORE sensitive than that nudge — sha256
+# is not a keyed MAC, so anything with write access to inject unsigned/
+# tampered mail also has read access to compute a matching hash and
+# self-write a forged receipt using the exact same write_receipt helper an
+# honest watcher uses. Full bypass, one extra `shasum` call. The check 1b
+# --strict signature hard-block below therefore does NOT use this receipt at
+# all — see its own comment for what it anchors on instead.
 if [[ -n "$COORD_DIR" && -n "$MY_ID" ]]; then
   # Inbox selection follows the STAR topology: the orchestrator's inbox is every
-  # PEER file in the coord-dir; a spoke's inbox is orchestrator.md only. Never
-  # gate on your OWN outbox — heartbeat/dead-man alerts posted there (→ ALL)
-  # would self-trigger the gate on every call forever.
+  # PEER file in the coord-dir; a spoke's inbox is orchestrator.md PLUS any
+  # same-project peer impl-*.md (PROTOCOL 1.3.0 sibling awareness — item 9,
+  # 2026-08-09: this used to be orchestrator.md only, silently missing the
+  # peer-outbox traffic coord-monitor.sh's `watched()` has gated commits on
+  # since 1.3.0; same protocol_resolve_project/protocol_project_of_identity
+  # helpers as that function, so the two watch sets cannot drift apart again).
+  # Never gate on your OWN outbox — heartbeat/dead-man alerts posted there
+  # (→ ALL) would self-trigger the gate on every call forever.
   INBOX_FILES=()
   if [[ "$MY_ID" == "orchestrator" ]]; then
-    while IFS= read -r _f; do INBOX_FILES+=("$_f"); done < <(
-      find "$COORD_DIR" -maxdepth 1 -name "*.md" ! -name "orchestrator.md" ! -name "QUEUE.md" ! -name "*.archive.md" 2>/dev/null | sort)
+    # ROUND-6 (2026-08-09, Rook): this was the 4TH independently-maintained
+    # "is this a seat outbox" exclusion list (round 5 unified the other
+    # three — coord-monitor.sh's local watched(), its remote sweep, and this
+    # SAME hook's remote check 1c — but missed this one, which predates the
+    # remote extension). It was missing PROJECTS.md and queue-*.md — exactly
+    # the multi-project topology this pack ships a template for
+    # (QUEUE-template.md). An ordinary broadcast posted into queue-alpha.md
+    # on a normal multi-project hub — no attacker — got the structural
+    # FROM==basename(file) check applied incorrectly and permanently
+    # hard-blocked the hub. Now uses the SAME shared predicate as the other
+    # three sites. Falls back to the old (now-corrected) blocklist only if
+    # coord-address-filter.sh somehow isn't sourced — same conservative
+    # posture as this file already uses elsewhere, never "include everything
+    # unfiltered" as the degrade path.
+    if command -v coord_is_seat_outbox_basename >/dev/null 2>&1; then
+      while IFS= read -r _f; do
+        _b=$(basename "$_f")
+        [[ "$_b" == "orchestrator.md" ]] && continue
+        coord_is_seat_outbox_basename "$_b" || continue
+        INBOX_FILES+=("$_f")
+      done < <(find "$COORD_DIR" -maxdepth 1 -name "*.md" 2>/dev/null | sort)
+    else
+      while IFS= read -r _f; do INBOX_FILES+=("$_f"); done < <(
+        find "$COORD_DIR" -maxdepth 1 -name "*.md" ! -name "orchestrator.md" ! -name "QUEUE.md" ! -name "PROJECTS.md" ! -name "queue-*.md" ! -name "*.archive.md" 2>/dev/null | sort)
+    fi
   else
     [[ -f "$COORD_DIR/orchestrator.md" ]] && INBOX_FILES+=("$COORD_DIR/orchestrator.md")
+    if command -v protocol_resolve_project >/dev/null 2>&1; then
+      _my_project=$(protocol_resolve_project "$MY_ID" "" "$COORD_DIR/$MY_ID.md" "$COORD_DIR")
+      if [[ -n "$_my_project" ]]; then
+        while IFS= read -r _f; do
+          _b=$(basename "$_f" .md)
+          [[ "$_b" == "$MY_ID" ]] && continue
+          _p=$(protocol_project_of_identity "$_b")
+          [[ "$_p" == "$_my_project" ]] && INBOX_FILES+=("$_f")
+        done < <(find "$COORD_DIR" -maxdepth 1 -name "impl-*.md" 2>/dev/null | sort)
+      fi
+      unset _my_project
+    fi
   fi
   if [[ ${#INBOX_FILES[@]} -eq 0 ]]; then
     echo "INFO [mailbox-read gate]: no inbox files for '$MY_ID' in $COORD_DIR — skipping (not in dual mode?)."
   fi
+
+  # ROUND-6 (2026-08-09, Cipher — live-demonstrated bypass): COORD_REMOTE_SEAT_HOOK
+  # is meant ONLY for a remote seat running this hook against its own
+  # single-file bus-dir-as-coord-dir (§ Message Authenticity in
+  # REMOTE-SEATS.md). Before round-6 nothing enforced that scope — the var
+  # was honored uniformly across the whole check-1b loop below wherever it
+  # was set. Cipher set it in a HUB's own environment (a real multi-peer
+  # $COORD_DIR, one local peer posting a genuinely unsigned message) and got
+  # the local signature check silently skipped for THAT peer too —
+  # PRE-COMMIT HOOK: PASSED on content that should have hard-blocked. A
+  # real remote seat's own bus dir has exactly three properties a real hub
+  # coord-dir never has all three of at once: MY_ID is never "orchestrator"
+  # there (remote seats are always spokes), its own INBOX_FILES resolves to
+  # AT MOST one file (a possibly-mirrored orchestrator.md — a remote seat
+  # never watches same-project siblings the way a hub-side spoke check would
+  # enumerate multiple), and it structurally has NO local allowed_signers
+  # (the single-canonical-trust-root design) — a real hub coord-dir always
+  # has one. Require all three before honoring the var at all; otherwise
+  # WARN and ignore it (fail toward running the real check, never toward
+  # skipping it on an unproven claim).
+  _REMOTE_SEAT_HOOK_REQUESTED=0
+  [[ "${COORD_REMOTE_SEAT_HOOK:-0}" = 1 ]] && _REMOTE_SEAT_HOOK_REQUESTED=1
+  _REMOTE_SEAT_HOOK_SCOPE_OK=0
+  if [[ "$_REMOTE_SEAT_HOOK_REQUESTED" = 1 ]]; then
+    if [[ "$MY_ID" != "orchestrator" ]] && [[ ${#INBOX_FILES[@]} -le 1 ]] && [[ ! -f "$COORD_DIR/allowed_signers" ]]; then
+      _REMOTE_SEAT_HOOK_SCOPE_OK=1
+    else
+      echo "WARN [sig-verify]: COORD_REMOTE_SEAT_HOOK=1 is set but this does not look like a remote seat's own bus-dir-as-coord-dir (MY_ID='$MY_ID', ${#INBOX_FILES[@]} inbox file(s), local allowed_signers $([[ -f "$COORD_DIR/allowed_signers" ]] && echo present || echo absent)) — IGNORING it and running the local signature check normally. If this IS a legitimate remote seat, check that MY_ID isn't 'orchestrator', that this coord-dir has no local allowed_signers, and that its inbox resolves to at most one file." >&2
+    fi
+  fi
+  unset _REMOTE_SEAT_HOOK_REQUESTED
+
   for ORCH_FILE in ${INBOX_FILES[@]+"${INBOX_FILES[@]}"}; do
     RECEIPT_FILE="$COORD_DIR/.watch-state/$MY_ID/$(basename "$ORCH_FILE").size"
     orch_sz=$(wc -c < "$ORCH_FILE" 2>/dev/null | tr -d ' ' || echo 0)
@@ -257,15 +424,17 @@ if [[ -n "$COORD_DIR" && -n "$MY_ID" ]]; then
       # All content before this point is treated as already acknowledged.
       mkdir -p "$(dirname "$RECEIPT_FILE")" 2>/dev/null || true
       chmod 700 "$(dirname "$RECEIPT_FILE")" 2>/dev/null || true
-      printf '%s\n' "$orch_sz" > "$RECEIPT_FILE" 2>/dev/null || true
-      echo "OK [mailbox-read gate]: first run — receipt initialized at ${orch_sz}B."
-    else
-      receipt_sz=$(cat "$RECEIPT_FILE" 2>/dev/null | tr -d '[:space:]' || echo 0)
-      # F6: validate receipt integrity — reject non-integer or forged oversized offsets.
-      if ! [[ "$receipt_sz" =~ ^[0-9]+$ ]] || [[ "$receipt_sz" -gt "$orch_sz" ]]; then
-        echo "WARN [mailbox-read gate]: receipt value ('${receipt_sz}') is invalid or exceeds file size; treating as 0 (unread)." >&2
-        receipt_sz=0
+      if write_receipt "$RECEIPT_FILE" "$orch_sz" "$ORCH_FILE"; then
+        echo "OK [mailbox-read gate]: first run — receipt initialized at ${orch_sz}B."
+      else
+        echo "WARN [mailbox-read gate]: could not compute receipt hash (no shasum/sha256sum on PATH) — receipt not written; every run will re-treat this file as unread until one is available." >&2
       fi
+    else
+      # F6 + item 1: read_receipt (coord-receipt.sh) validates shape AND binds
+      # the receipt to the content it actually claims to cover — any forged,
+      # corrupted, or malformed receipt falls back to 0 (full unread), loudly
+      # (WARN/FAIL on stderr), never silently trusted.
+      receipt_sz=$(read_receipt "$RECEIPT_FILE" "$ORCH_FILE")
 
       if [[ "$orch_sz" -gt "$receipt_sz" ]]; then
         # There is content after the receipt. Check if any of it is addressed to us.
@@ -285,9 +454,14 @@ if [[ -n "$COORD_DIR" && -n "$MY_ID" ]]; then
           tail -c +"$((receipt_sz + 1))" "$ORCH_FILE" 2>/dev/null | \
             grep -E "$_addr_pattern" | head -10 || true
           echo ""
-          echo "After reading, re-arm the watcher — it auto-advances the offset file on every wake."
-          echo "In standalone mode (no active watcher), advance the offset manually:"
-          printf "  wc -c < %q | tr -d ' ' > %q\n" "$ORCH_FILE" "$RECEIPT_FILE"
+          echo "After reading, re-arm the watcher — it auto-advances the receipt on every wake."
+          echo "In standalone mode (no active watcher), advance the receipt manually:"
+          _adv_n=$(wc -c < "$ORCH_FILE" 2>/dev/null | tr -d ' ')
+          _adv_hash=$(compute_prefix_sha256 "$ORCH_FILE" "$_adv_n" 2>/dev/null || true)
+          if [[ -n "$_adv_hash" ]]; then
+            printf "  printf 'offset=%%s\\nverified_sha256=%%s\\n' %s %s > %q\n" "$_adv_n" "$_adv_hash" "$RECEIPT_FILE"
+          fi
+          unset _adv_n _adv_hash
           FAIL=1
         else
           echo "OK [mailbox-read gate]: new content in $ORCH_FILE not addressed to '$MY_ID' or 'ALL'."
@@ -296,9 +470,347 @@ if [[ -n "$COORD_DIR" && -n "$MY_ID" ]]; then
         echo "OK [mailbox-read gate]: offset current (${receipt_sz}B = file size)."
       fi
     fi
+
+    # ── check 1b: SSH signature verification over unverified mail (PROTOCOL 1.4.0) ──
+    #
+    # GIT-ANCHORED LOWER BOUND (item 1, 2026-08-09; redesigned round-2,
+    # 2026-08-09 — Cipher): this used to snap the RECEIPT's offset via
+    # --find-boundary and trust it as the verification floor. Cipher
+    # demonstrated that is a full bypass — see the RECEIPT-FORGERY HARDENING
+    # comment above check 1 for why. This check is now fully independent of
+    # the receipt and of the Rule-4 nudge above (runs every time, regardless
+    # of what that block decided) and instead anchors on `git show
+    # HEAD:<file>` — the file's content as of the last commit (empty string
+    # if the file is untracked/new in this repo). This is not
+    # attacker-forgeable without rewriting git history, which this protocol
+    # already treats as a gated, irreversible action elsewhere (Disaster
+    # Rule 1, the force-push carveout) — an attacker able to do that has a
+    # far bigger problem to answer for than this gate. The git-derived byte
+    # count is then snapped via coord-verify.sh --find-boundary (Rook: fixed
+    # round-2 to walk the same consumed-range logic the main verify loop
+    # uses, so a body-quoted header can never be chosen as the anchor — see
+    # that script's header comment) to the nearest real message boundary at
+    # or before it — NEVER a raw byte cut — so this can never start
+    # mid-message and silently skip that message's remainder. This verifies
+    # coord-verify.sh directly against the REAL mailbox file with
+    # --since-line, not a scratch copy of the tail bytes — a scratch copy
+    # has no real basename, which would falsely trip coord-verify.sh's
+    # FROM==basename(file) structural check on every message. If the file
+    # has never been committed (git show fails) or the derived offset can't
+    # be placed relative to any header at all, this verifies the WHOLE file
+    # rather than silently treating any prefix as clean — the safe default
+    # in both directions.
+    #
+    # Runs coord-verify.sh --strict, which is fatal on any ❌ INVALID
+    # (tamper/forgery signal — always fatal), any ❓ UNKNOWN-SIGNER, and
+    # any non-exempt ⚠️ UNVERIFIED (an unsigned message once this
+    # amendment is adopted — see coord-verify.sh's header comment for the
+    # exempt message shapes that never fail this check).
+    # ROUND-5 (2026-08-09, Rook): on the REMOTE seat's own machine, its
+    # coord-dir IS its bus dir, with no local allowed_signers by design (see
+    # REMOTE-SEATS.md § Message Authenticity — single canonical trust root).
+    # If this hook ALSO runs there (e.g. a remote seat committing its own
+    # coord-dir content locally), check 1b below would find no local trust
+    # root and hard-block that seat's commits FOREVER — the exact same
+    # failure shape coord-send.sh had before its own --remote-seat fix,
+    # never previously addressed for this hook. Rook: "silence is the worst
+    # of the three [choices]" — COORD_REMOTE_SEAT_HOOK=1 is the explicit,
+    # documented escape (env-var-only: this hook has no CLI flag surface,
+    # wired via fixed positional args in settings.json — see this file's own
+    # header). Deliberately a DIFFERENT variable than coord-send.sh's
+    # COORD_REMOTE_SEAT/--remote-seat (round-5 item 6): sharing one var would
+    # mean setting it for the hook's benefit on a remote seat's machine also
+    # silently changes coord-send.sh's behavior there, and vice versa on the
+    # hub — two different explicit-vs-ambient risk profiles, kept separate on
+    # purpose. The compensating control is the HUB's check 1c above, which
+    # verifies this seat's traffic remotely regardless.
+    if [[ "$_REMOTE_SEAT_HOOK_SCOPE_OK" = 1 ]]; then
+      # WARN, not INFO (round-6, Cipher): COORD_REMOTE_SEAT_HOOK is an
+      # environment variable — always ambient, same risk class that earned
+      # coord-send.sh's sibling COORD_REMOTE_SEAT var a WARN in round 5 (a
+      # stray export left set is invisible until output like this names it).
+      echo "WARN [sig-verify]: COORD_REMOTE_SEAT_HOOK=1 — skipping the LOCAL signature check for $ORCH_FILE (this bus dir has no local allowed_signers by design, and this coord-dir passed the remote-seat scope check above). The HUB verifies this seat's traffic remotely via coordination-precommit-hook.sh's check 1c — see REMOTE-SEATS.md § Message Authenticity. If this WAS NOT intended, check for a stray COORD_REMOTE_SEAT_HOOK=1 in this seat's environment." >&2
+    elif [[ -f "$COORD_VERIFY_SH" ]]; then
+      _git_anchor_n=0
+      # `HEAD:./<basename>`, resolved relative to a cwd inside the file's OWN
+      # directory, not a manually-stripped absolute-toplevel prefix — a
+      # toplevel computed via `git rev-parse --show-toplevel` can resolve
+      # through a symlink (e.g. macOS /var -> /private/var) that $ORCH_FILE's
+      # own absolute path never passes through, silently breaking a naive
+      # string-prefix strip and falling back to "untracked" even for a file
+      # that IS committed (caught by this suite's own git-backed fixture).
+      # `git show HEAD:./x` sidesteps that entirely: git resolves it against
+      # cwd's in-repo position, no path-prefix arithmetic needed.
+      if _orch_dir=$(cd "$(dirname "$ORCH_FILE")" 2>/dev/null && pwd); then
+        if ( cd "$_orch_dir" && git show "HEAD:./$(basename "$ORCH_FILE")" > /dev/null 2>&1 ); then
+          _git_anchor_n=$(cd "$_orch_dir" && git show "HEAD:./$(basename "$ORCH_FILE")" 2>/dev/null | wc -c | tr -d ' ')
+        elif ! ( cd "$_orch_dir" && git rev-parse --show-toplevel > /dev/null 2>&1 ); then
+          echo "WARN [sig-verify]: not inside a git working tree — cannot derive a git-anchored verification floor for $ORCH_FILE; verifying the whole file." >&2
+        fi
+        unset _orch_dir
+      fi
+      [[ "$_git_anchor_n" =~ ^[0-9]+$ ]] || _git_anchor_n=0
+
+      _fb_out=""
+      _fb_rc=0
+      _fb_out=$(bash "$COORD_VERIFY_SH" --dir "$COORD_DIR" --file "$ORCH_FILE" --find-boundary "$_git_anchor_n" 2>&1) || _fb_rc=$?
+      unset _git_anchor_n
+      if [[ "$_fb_rc" -ne 0 || "$_fb_out" == "NOCOVER" ]]; then
+        _since_line=0
+      elif [[ "$_fb_out" =~ ^[0-9]+$ ]]; then
+        _since_line="$_fb_out"
+      else
+        echo "WARN [sig-verify]: unexpected --find-boundary output ('$_fb_out') for $ORCH_FILE — verifying the whole file." >&2
+        _since_line=0
+      fi
+      unset _fb_out _fb_rc
+
+      SIG_VERIFY_RC=0
+      SIG_VERIFY_OUT=$(bash "$COORD_VERIFY_SH" --dir "$COORD_DIR" --file "$ORCH_FILE" --since-line "$_since_line" --strict 2>&1) || SIG_VERIFY_RC=$?
+      unset _since_line
+      if [[ "$SIG_VERIFY_RC" -ne 0 ]]; then
+        echo ""
+        echo "FAIL [sig-verify]: mail in $ORCH_FILE since the last commit contains an INVALID, UNKNOWN-SIGNER, or unsigned (non-exempt) message:"
+        echo "$SIG_VERIFY_OUT" | sed 's/^/  /'
+        echo ""
+        echo "A verification failure is a tamper/impersonation signal, not friction to route around."
+        echo "Never bypass this without explicit human sign-off (see safety-carveouts.md)."
+        echo "If this IS a remote seat's own bus-dir-as-coord-dir (no local trust root by design), set COORD_REMOTE_SEAT_HOOK=1 in its environment — see REMOTE-SEATS.md § Message Authenticity."
+        FAIL=1
+      else
+        echo "OK [sig-verify]: $ORCH_FILE since the last commit — no INVALID / UNKNOWN-SIGNER / non-exempt UNVERIFIED signatures."
+      fi
+    else
+      echo "INFO [sig-verify]: coord-verify.sh not found beside this hook ($COORD_VERIFY_SH) — skipping SSH signature check."
+    fi
   done
 else
   echo "INFO [mailbox-read gate]: COORD_DIR or MY_ID not set — skipping."
+fi
+
+# ── check 1c: remote-channel signature verification (PROTOCOL 1.4.0 remote-seat
+#    extension, 2026-08-09, real gap 2; hardened round-5, 2026-08-09 —
+#    Cipher/Rook, both live-confirmed) ─────────────────────────────────────────
+#
+# check 1b above only ever enumerates $COORD_DIR/*.md on the LOCAL filesystem
+# — a remote seat's bus dir lives on a different host by definition and is
+# structurally invisible to it. This used to be REMOTE-SEATS.md's documented
+# scoping gap ("a remote seat's traffic is structurally invisible to the
+# hard-block gate"). Closed by reading <coord-dir>/.remote-channels (one
+# "<host> <bus-dir>" line per configured channel, AUTO-WRITTEN by
+# coord-monitor.sh's remote channel when it arms — see that script's own
+# comment; never a manual step) and, for each channel, ssh-fetching every
+# remote seat's outbox file(s) IN FULL and verifying each against the SAME
+# LOCAL allowed_signers and SAME structural FROM==basename(file) rule check
+# 1b uses (via coord-remote-verify.sh's verify_remote_buffer — the exact
+# same helper coord-monitor.sh's remote channel uses, so the two can never
+# verify differently).
+#
+# SCOPE, why full-file every time (not git-anchored like check 1b): there is
+# no local git history for a file that lives on a different host — nothing
+# to anchor against. Remote mailboxes are bounded by this protocol's own
+# ~200-message/50KB archive-hygiene convention (see MAILBOX-template.md), so
+# a full re-verify on every commit is cheap regardless of the channel's own
+# rotation cadence, not a wasted-effort concern the way a fully unbounded
+# file would be.
+#
+# REACHABILITY: a bounded ssh timeout (ConnectTimeout + ServerAlive — no new
+# dependency on GNU coreutils `timeout(1)`, which this dev box does not even
+# have, matching this protocol's "no new dependency" posture elsewhere).
+# An unreachable remote host does NOT silently skip verification — that
+# would be a bypass an attacker (or a flaky network) gets for free. It fails
+# CLOSED, loud, with a diagnostic that names the real cause (network
+# unreachability) rather than reading like a tamper signal.
+#
+# ROUND-5 HARDENING (Cipher live-exploited an RCE here; Rook independently
+# found two more real gaps — see REMOTE-SEATS.md § Message Authenticity for
+# the full closed-history writeup):
+#   1. $_rc_name (a filename LISTED BY THE REMOTE HOST — i.e. as trustworthy
+#      as whoever can write into the remote bus dir, exactly the population
+#      this whole extension exists to distrust) used to be spliced into the
+#      remote fetch command with ZERO shell-metacharacter escaping. A file
+#      named e.g. "x'; id; echo '.md" executed arbitrary code on the hub,
+#      BEFORE any signature check ran. Every value spliced into a remote
+#      command string (bus dir + filename, for BOTH the listing and the
+#      fetch) now goes through coord_remote_shquote (coord-remote-verify.sh)
+#      — the SAME helper coord-monitor.sh's remote channel uses, so the two
+#      can never diverge on how a value is escaped.
+#   2. `for _rc_name in $_rc_files` was unquoted — remote filenames underwent
+#      both local IFS word-splitting AND local pathname expansion against
+#      this host's own cwd. `while IFS= read -r` below fixes it.
+#   3. Every remote ssh call here now passes -n (redirect ssh's own stdin
+#      from /dev/null) — this loop reads `.remote-channels` from fd0 via
+#      `done < "$_REMOTE_CHANNELS_FILE"`; without -n, an ssh call inside that
+#      loop body would race to drain the SAME fd0, silently truncating the
+#      outer `while read` loop's remaining channel lines on a multi-channel
+#      config (a real, latent correctness bug independent of the RCE, found
+#      while fixing it — see coord-monitor.sh's remote_sweep_sizes for the
+#      identical hazard/fix on the monitor side).
+#   4. coord_is_seat_outbox_basename (coord-address-filter.sh, shared with
+#      coord-monitor.sh's local + remote enumerators — see that function's
+#      header for the full "three independently-drifting lists" history) is
+#      now applied here too: a remote QUEUE.md/PROJECTS.md/queue-*.md/archive
+#      file — an ORDINARY deployment using a queue file, not a crafted
+#      attack — used to permanently hard-block every hub commit via a false
+#      structural FROM/basename mismatch. This was previously the ONLY one
+#      of the four enumerators applying NO exclusion at all.
+#   5. This block now ALWAYS prints which host:bus-dir combination(s) were
+#      checked, even zero — and cross-checks a live watcher-remote.pid
+#      against an empty/missing .remote-channels. See the summary block
+#      below the per-channel loop for the full rationale (a missing/empty/
+#      redirected .remote-channels used to produce ZERO output, silently
+#      indistinguishable from "no remote channel exists").
+if [[ -n "$COORD_DIR" ]]; then
+  _REMOTE_CHANNELS_FILE="$COORD_DIR/.remote-channels"
+  _RC_CHECKED_COUNT=0
+  _RC_CHECKED_SUMMARY=""
+
+  # ROUND-6 (2026-08-09, Rook): this guard used to check for verify_remote_buffer
+  # and coord_remote_shquote but NOT coord_is_seat_outbox_basename — if
+  # coord-address-filter.sh alone was missing (while coord-remote-verify.sh
+  # was present), the call at "coord_is_seat_outbox_basename ... || continue"
+  # below would fail with exit 127 (command not found), silently swallowed
+  # by that same `|| continue`, and EVERY remote file got skipped — while
+  # this block still printed "checked N remote channel(s)" and exited 0.
+  # coord_is_seat_outbox_basename is now part of the same guard as the other
+  # two required helpers, so a partially-missing helper set degrades to the
+  # fail-closed else branch below instead of a silent no-op skip.
+  if [[ -f "$COORD_REMOTE_VERIFY_SH" && -f "$COORD_VERIFY_SH" ]] && command -v verify_remote_buffer >/dev/null 2>&1 && command -v coord_remote_shquote >/dev/null 2>&1 && command -v coord_is_seat_outbox_basename >/dev/null 2>&1; then
+    if [[ -s "$_REMOTE_CHANNELS_FILE" ]]; then
+      _SSH_OPTS=(-n -o BatchMode=yes -o ConnectTimeout=10 -o ServerAliveInterval=5 -o ServerAliveCountMax=2)
+      while IFS=' ' read -r _rc_host _rc_bus; do
+        [[ -z "$_rc_host" || -z "$_rc_bus" || "$_rc_host" == \#* ]] && continue
+        _RC_CHECKED_COUNT=$((_RC_CHECKED_COUNT + 1))
+        _RC_CHECKED_SUMMARY="${_RC_CHECKED_SUMMARY}  - ${_rc_host}:${_rc_bus}
+"
+        _q_rc_bus=$(coord_remote_shquote "$_rc_bus")
+        _rc_list_script="for f in $_q_rc_bus/*.md; do [ -e \"\$f\" ] || continue; printf '%s\n' \"\$(basename \"\$f\")\"; done"
+        _rc_files=""
+        _rc_list_rc=0
+        _rc_files=$(ssh "${_SSH_OPTS[@]}" "$_rc_host" "$_rc_list_script" 2>/dev/null) || _rc_list_rc=$?
+        if [[ "$_rc_list_rc" -ne 0 ]]; then
+          echo ""
+          echo "FAIL [remote-sig-verify]: could not reach remote channel $_rc_host to verify — treating as UNVERIFIED, not skipping."
+          echo "  (bus dir: $_rc_bus — configured in $_REMOTE_CHANNELS_FILE)"
+          echo "Never bypass this without explicit human sign-off (see safety-carveouts.md)."
+          FAIL=1
+          unset _q_rc_bus
+          continue
+        fi
+        while IFS= read -r _rc_name; do
+          [[ -z "$_rc_name" ]] && continue
+          # Round-6 (2026-08-09, Cipher): also reject an embedded newline/CR
+          # here — consumption-side defense in depth alongside coord-remote-
+          # verify.sh's identical extension, and coord-monitor.sh's
+          # remote_sweep_script closing this at the LISTING source (see that
+          # function's header for the wire-format-injection this is about).
+          case "$_rc_name" in */*|.|..|*$'\n'*|*$'\r'*) continue;; esac
+          coord_is_seat_outbox_basename "$_rc_name" || continue
+          _q_rc_name=$(coord_remote_shquote "$_rc_name")
+          _rc_buf=""
+          _rc_fetch_rc=0
+          _rc_buf=$(ssh "${_SSH_OPTS[@]}" "$_rc_host" "cat $_q_rc_bus/$_q_rc_name" 2>/dev/null) || _rc_fetch_rc=$?
+          if [[ "$_rc_fetch_rc" -ne 0 ]]; then
+            echo ""
+            echo "FAIL [remote-sig-verify]: could not reach remote channel $_rc_host to fetch $_rc_name — treating as UNVERIFIED, not skipping."
+            echo "Never bypass this without explicit human sign-off (see safety-carveouts.md)."
+            FAIL=1
+            continue
+          fi
+          _rc_verify_out=""
+          _rc_verify_rc=0
+          _rc_verify_out=$(printf '%s' "$_rc_buf" | verify_remote_buffer "$COORD_DIR" "$_rc_name" "$COORD_VERIFY_SH" --strict 2>&1) || _rc_verify_rc=$?
+          if [[ "$_rc_verify_rc" -ne 0 ]]; then
+            echo ""
+            echo "FAIL [remote-sig-verify]: $_rc_host:$_rc_bus/$_rc_name contains an INVALID, UNKNOWN-SIGNER, or unsigned (non-exempt) message:"
+            echo "$_rc_verify_out" | sed 's/^/  /'
+            echo ""
+            echo "A verification failure is a tamper/impersonation signal, not friction to route around."
+            echo "Never bypass this without explicit human sign-off (see safety-carveouts.md)."
+            FAIL=1
+          else
+            echo "OK [remote-sig-verify]: $_rc_host:$_rc_bus/$_rc_name — no INVALID / UNKNOWN-SIGNER / non-exempt UNVERIFIED signatures."
+          fi
+        done <<< "$_rc_files"
+        unset _q_rc_bus
+      done < "$_REMOTE_CHANNELS_FILE"
+      unset _SSH_OPTS
+    fi
+  else
+    # ROUND-6 (2026-08-09, Cipher — live-demonstrated): this used to be
+    # INFO-only, no FAIL=1 anywhere. Live-confirmed: with a required helper
+    # missing (e.g. coord-remote-verify.sh removed) and no live
+    # watcher-remote.pid at that exact moment (the compensating cross-check
+    # below only saves you if a watcher happens to be running right then), a
+    # genuinely unsigned/tampered remote message sailed through — hook exit
+    # 0, commit allowed, zero attacker involvement required (ordinary
+    # deployment drift: a partial hub upgrade, a commit landing between
+    # watcher restarts). A CONFIGURED-but-UNVERIFIABLE remote channel must
+    # block, full stop — same fail-closed posture this check already uses
+    # for an unreachable host and for the empty/redirected-file cross-check
+    # below. "Verification could not run" is not a weaker case than
+    # "verification ran and found nothing wrong" — it must never be treated
+    # as equivalent to a clean pass.
+    if [[ -s "$_REMOTE_CHANNELS_FILE" ]]; then
+      echo ""
+      echo "FAIL [remote-sig-verify]: coord-remote-verify.sh/coord-verify.sh/coord-address-filter.sh not found (or missing a required helper) beside this hook, but $_REMOTE_CHANNELS_FILE configures at least one remote channel — cannot verify it. Treating as UNVERIFIED, not skipping."
+      echo "Never bypass this without explicit human sign-off (see safety-carveouts.md)."
+      FAIL=1
+    fi
+  fi
+
+  # Round-5 (2026-08-09, Cipher/Rook — both live-confirmed): ALWAYS state
+  # explicitly which channels were checked, even zero. A missing/empty
+  # .remote-channels used to produce ZERO output from this whole block —
+  # indistinguishable from "no remote channels exist" for a human reading
+  # hook output. Worse, Cipher demonstrated that pointing .remote-channels
+  # at an unrelated, genuinely-empty DECOY directory (while a real forged/
+  # unsigned message sits in the ACTUAL remote bus dir) produced exit 0 and
+  # zero diagnostic output — a completely silent bypass, since .remote-
+  # channels is itself unsigned, gitignored, coord-dir-local state, writable
+  # by exactly the actor this whole mechanism defends against.
+  #
+  # This does NOT cryptographically prevent that redirect (Rook: don't build
+  # a new verified-floor artifact to solve it — that ceiling is the same one
+  # already accepted for allowed_signers itself, see check 6 above and
+  # README.md § Message Authenticity: a coord-dir-write-level attacker can
+  # already edit either file). What it buys: the redirect becomes VISIBLE —
+  # an operator who knows their real remote bus dir sees the wrong one named
+  # right here in hook output, rather than silence. Tampering becomes noisy,
+  # not prevented outright — stated plainly, not overclaimed.
+  echo ""
+  echo "INFO [remote-sig-verify]: checked $_RC_CHECKED_COUNT remote channel(s) from $_REMOTE_CHANNELS_FILE"
+  [[ -n "$_RC_CHECKED_SUMMARY" ]] && printf '%s' "$_RC_CHECKED_SUMMARY"
+
+  # Cross-check (closes the missing/empty half of the gap above): a remote
+  # channel auto-writes its own watcher-remote.pid AND .remote-channels line
+  # together at arm time (coord-monitor.sh) — if a watcher-remote.pid shows a
+  # LIVE process but this hook found zero channels to check, either
+  # .remote-channels was never written (stale/pre-1.4.0 watcher), got
+  # deleted, or was redirected to a decoy that happens to be empty. All three
+  # are the same failure shape from here: a remote channel this host believes
+  # is armed is not being verified. Fail loud rather than silently trust an
+  # empty result — same posture as this file's other fail-closed gates.
+  if [[ "$_RC_CHECKED_COUNT" -eq 0 ]]; then
+    _RC_LIVE_WATCHER=""
+    for _rc_pidfile in "$COORD_DIR"/.watch-state/*/watcher-remote.pid; do
+      [[ -f "$_rc_pidfile" ]] || continue
+      _rc_wpid=$(cat "$_rc_pidfile" 2>/dev/null || true)
+      if [[ -n "$_rc_wpid" ]] && ps -p "$_rc_wpid" >/dev/null 2>&1; then
+        _RC_LIVE_WATCHER="$_rc_pidfile"
+        break
+      fi
+    done
+    if [[ -n "$_RC_LIVE_WATCHER" ]]; then
+      echo ""
+      echo "FAIL [remote-sig-verify]: a remote-channel watcher is running ($_RC_LIVE_WATCHER) but no channel was checked (.remote-channels missing/empty/unreadable at $_REMOTE_CHANNELS_FILE) — a live remote channel this host believes is armed is NOT being verified."
+      echo "  Restart the remote coord-monitor.sh channel (it re-writes .remote-channels on arm) or add the missing '<host> <bus-dir>' line by hand, then retry."
+      echo "Never bypass this without explicit human sign-off (see safety-carveouts.md)."
+      FAIL=1
+    fi
+    unset _RC_LIVE_WATCHER _rc_wpid _rc_pidfile
+  fi
+  unset _REMOTE_CHANNELS_FILE _RC_CHECKED_COUNT _RC_CHECKED_SUMMARY
 fi
 
 # ── check 2: Rule 1 advisory — dangerous staging verb ────────────────────────
@@ -358,7 +870,7 @@ fi
 _CANON_DOCS_DIR="${COORD_CANON_DOCS_DIR:-}"
 _CANON_CITE_PATTERN="${COORD_CANON_CITE_PATTERN:-}"
 _INDEX_CACHE="${COORD_DIR:-/tmp}/.watch-state/path-doc-index.tsv"
-if [[ -n "$_CANON_DOCS_DIR" && -n "$_CANON_CITE_PATTERN" && ( "$cmd_field" == *"git commit"* || "$cmd_field" == *"git push"* || "$cmd_field" == *"standalone"* ) ]]; then
+if [[ -n "$_CANON_DOCS_DIR" && -n "$_CANON_CITE_PATTERN" ]] && { _is_commit_landing_cmd "$cmd_field" || _is_push_cmd "$cmd_field"; }; then
   _changed_paths=$(git diff --cached --name-only 2>/dev/null || true)
   if [[ -z "$_changed_paths" && "$cmd_field" == *"git push"* ]]; then
     _changed_paths=$(git diff --name-only "@{upstream}..HEAD" 2>/dev/null || git diff --name-only "HEAD~5..HEAD" 2>/dev/null || true)
@@ -456,8 +968,16 @@ _GATED_PATH_PATTERN="${COORD_GATED_PATH_PATTERN:-}"
 
 _auth_ref_ok() {
   local blob="$1"
+  # Round-2 (item 5): DECISION-[A-Z0-9-]+ under -i (case-insensitive) matched
+  # "decision-tree"/"decision-making"/"decision-log" — any prose containing
+  # those words satisfied the trust-root gate. It also matched this
+  # protocol's OWN unrelated "DECISION-NEEDED" vocabulary (MAILBOX-template.md
+  # § Message Grammar) — the opposite of an authorization, quoting a STATUS
+  # tag would have satisfied the gate. Requiring a trailing digit closes both:
+  # a real DECISION reference (DECISION-42, DECISION-2026-08-09-3) always
+  # ends in one; neither false positive above does.
   printf '%s' "$blob" | grep -qiE \
-    '(AUTH:|authorized[[:space:]]+by|human[[:space:]]+GO|human-GO|COORD-AUTH:|DECISION-[A-Z0-9-]+|sign-off:|human[[:space:]]+sign-?off)' \
+    '(AUTH:|authorized[[:space:]]+by|human[[:space:]]+GO|human-GO|COORD-AUTH:|DECISION-[A-Z0-9-]*[0-9]|sign-off:|human[[:space:]]+sign-?off)' \
     && return 0
   [[ -n "${COORD_AUTH_REF:-}" ]] && return 0
   return 1
@@ -496,6 +1016,89 @@ if [[ ( -n "$_GATED_REMOTE_PATTERN" || -n "$_GATED_PATH_PATTERN" ) && "$cmd_fiel
   fi
 elif [[ "$cmd_field" == *"git push"* ]]; then
   echo "INFO [gated-push]: no COORD_GATED_REMOTE_PATTERN / COORD_GATED_PATH_PATTERN configured — gate disabled."
+fi
+
+# ── check 6: always-on allowed_signers write gate (item 2, human-approved 2026-08-09) ──
+# UNCONDITIONAL and NOT project-configurable, unlike check 5 above.
+# allowed_signers is the trust root for every signature verification in this
+# protocol (coord-verify.sh's `ssh-keygen -Y verify -f allowed_signers ...`)
+# — a silent or careless edit here (a bad rotate, a forged row slipped in by
+# a buggy script, a copy-paste mistake merging two coord-dirs' trust roots)
+# can quietly downgrade what every reader trusts with no visible sign until
+# an attack actually lands. Any commit-landing verb (see
+# `_is_commit_landing_cmd` above — commit, merge, cherry-pick, rebase, am,
+# revert, pull) OR `git push` touching a file named allowed_signers is
+# BLOCKED unless an explicit authorization reference (same _auth_ref_ok
+# pattern as check 5) is present.
+#
+# For a commit-landing verb, no NEW commit object exists yet to `git log`
+# inspect — the reference must be in the COMMAND text itself (the -m message
+# being typed right now, or a heredoc/file the caller is about to commit
+# with). For `git push`, reuse check 5's git-log scan of already-made commits.
+#
+# DETECTION SCOPE (round-2, item 5; verb coverage widened round-3, item 1):
+# `git diff --cached --name-only` alone misses `git commit -a` / `git commit
+# -am` / `git commit <pathspec>` — all stage their own content AT COMMIT
+# TIME, invisible to a check that only looks at what is ALREADY staged
+# before the commit runs. Also checks the working-tree diff (`git diff
+# --name-only`, tracked-file modifications not yet staged — exactly what
+# `-a` would pick up) and the command text itself for a literal
+# `allowed_signers` mention (catches an explicit pathspec argument even if,
+# for some reason, the git diff calls above can't run). The same
+# staged+working-tree+text-mention union now runs for merge/cherry-pick/
+# rebase/am/revert/pull too, not just literal `git commit` — those verbs
+# land a commit from the working tree or an existing ref just as surely,
+# and over-detection here is explicitly safe (see below).
+# A false positive here (flagging a commit that doesn't actually end up
+# touching allowed_signers) just asks for an unnecessary auth reference —
+# safe to err toward over-detection for a trust-root file.
+#
+# Ceiling (matches check 5's + README.md § Message Authenticity's "honest
+# ceiling" voice): this does NOT stop a determined malicious co-resident
+# process with write access to the coord-dir — filesystem permissions were
+# never an isolation boundary in this protocol, and the reference string is
+# actor-written, not cryptographically tied to the change. It stops an
+# ACCIDENTAL or careless edit from slipping through unreviewed, and forces
+# an auditable trail for a deliberate one. Full enforcement against a
+# hostile co-resident needs OS-level process isolation — out of scope for a
+# filesystem-perms-based protocol.
+_touches_allowed_signers() {
+  printf '%s\n' "$1" | grep -qE '(^|/)allowed_signers$'
+}
+
+if _is_commit_landing_cmd "$cmd_field" || _is_push_cmd "$cmd_field"; then
+  _AS_TOUCHED=0
+  if _is_commit_landing_cmd "$cmd_field"; then
+    _as_paths=$(git diff --cached --name-only 2>/dev/null || true)
+    _touches_allowed_signers "$_as_paths" && _AS_TOUCHED=1
+    _as_wt_paths=$(git diff --name-only 2>/dev/null || true)
+    _touches_allowed_signers "$_as_wt_paths" && _AS_TOUCHED=1
+    unset _as_wt_paths
+    printf '%s' "$cmd_field" | grep -qE '(^|[[:space:]/])allowed_signers([[:space:]]|$)' && _AS_TOUCHED=1
+  fi
+  if _is_push_cmd "$cmd_field"; then
+    _as_paths=$(git diff --name-only "@{upstream}..HEAD" 2>/dev/null || git diff --name-only "HEAD~5..HEAD" 2>/dev/null || true)
+    _touches_allowed_signers "$_as_paths" && _AS_TOUCHED=1
+  fi
+  if [[ "$_AS_TOUCHED" -eq 1 ]]; then
+    _as_ref_ok=0
+    _auth_ref_ok "$cmd_field" && _as_ref_ok=1
+    if [[ "$_as_ref_ok" -ne 1 && "$cmd_field" == *"git push"* ]]; then
+      _as_msgs=$(git log --format=%B "@{upstream}..HEAD" 2>/dev/null || git log -3 --format=%B 2>/dev/null || true)
+      _auth_ref_ok "$_as_msgs" && _as_ref_ok=1
+    fi
+    if [[ "$_as_ref_ok" -eq 1 ]]; then
+      echo "OK [allowed_signers-gate]: touches allowed_signers, authorization reference present."
+    else
+      echo ""
+      echo "FAIL [allowed_signers-gate]: this commit/push touches allowed_signers without an authorization reference."
+      echo "  allowed_signers is the trust root for every signature verification in this protocol —"
+      echo "  an unreviewed change here can silently downgrade what every reader trusts."
+      echo "  Include AUTH:/human GO/DECISION-…/sign-off: in the commit message, or export COORD_AUTH_REF=…"
+      echo "  Ceiling: this blocks an accidental/unreviewed edit, not a determined co-resident forger — see README.md § Message Authenticity."
+      FAIL=1
+    fi
+  fi
 fi
 
 # ── dump roster (informational) ───────────────────────────────────────────────

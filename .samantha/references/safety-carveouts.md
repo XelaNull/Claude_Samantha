@@ -71,6 +71,7 @@ When running in star mode (Samantha + peer Implementer seat(s); formerly "dual")
 - **Stay in lane** — each agent's zone is defined at dispatch. Do not drift into a sibling agent's zone without explicit coordination.
 - **Read the mailbox before commit/push** — confirm no concurrent work is in flight on the same files.
 - **Prefer unicast** — do not address single-seat orders to `ALL` (wakes every spoke on a shared hub).
+- **Never bypass or disable `coord-verify.sh --strict` / the coordination-precommit-hook's SSH-signature hard-block without explicit human sign-off** (PROTOCOL 1.4.0, Message Authenticity). A verification failure is a tamper/impersonation signal, not friction to route around.
 
 ---
 

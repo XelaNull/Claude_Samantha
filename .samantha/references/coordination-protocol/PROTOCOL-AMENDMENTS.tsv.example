@@ -23,3 +23,4 @@
 item1	pending	Example: queue-depth floor mechanized in coord-status + heartbeat
 item2	implemented	Example: PROTOCOL-VERSION stamp added to this protocol's README
 item3	n/a-prompt	Example: evidence-paste discipline (prompt-only until mechanized)
+SSH-MSG-AUTH-20260809	implemented	Message Authenticity (SSH signing) — coord-keygen.sh/coord-verify.sh, coord-send.sh always signs, precommit hard-block, bootstrap key handshake (PROTOCOL 1.4.0)

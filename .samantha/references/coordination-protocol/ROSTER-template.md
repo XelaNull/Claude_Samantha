@@ -25,13 +25,17 @@
 ## Identity
 
 ```
-schema_version: 1
+schema_version: 2
 identity:      <my-identity>           # stable, derived from cwd/worktree name; never changes mid-session
 role:          orchestrator | implementer
 project:       <project-key>           # REQUIRED for multi-project hubs (e.g. sectorwars, aiclient).
                                        # Also: --project on scripts, or .presence/<id> project=.
                                        # Inference: impl-<project> or impl-<project>-<lane> → first segment.
 zone:          <absolute path this instance owns>  # cwd or worktree root; "workspace root" for Orchestrator
+pubkey_fingerprint: <SHA256:...>       # OPTIONAL (PROTOCOL 1.4.0). ssh-keygen -lf output for this
+                                       # identity's enrolled signing key — coord-keygen.sh --fingerprint.
+                                       # Display/audit convenience only; allowed_signers is the actual
+                                       # trust root, not this field. Absent on pre-1.4.0 entries.
 ```
 
 ## State
@@ -111,6 +115,7 @@ Readers must tolerate missing optional fields by using the default. Never break 
 | Version | Change | Date |
 |---------|--------|------|
 | 1 | Initial schema | (authoring date) |
+| 2 | Added optional `pubkey_fingerprint` field (PROTOCOL 1.4.0, Message Authenticity — SSH signing) | 2026-08-09 |
 
 Note: 2026-07-03: P1–P5 ratified (unanimous) — see orchestrator.md log. (Process rules only; no schema field changes — schema_version remains 1.)
 
@@ -121,10 +126,11 @@ Note: 2026-07-03: P1–P5 ratified (unanimous) — see orchestrator.md log. (Pro
 ```
 # Presence: impl-alpha
 
-schema_version: 1
+schema_version: 2
 identity:      impl-alpha
 role:          implementer
 zone:          /path/to/worktrees/impl-alpha
+pubkey_fingerprint: SHA256:qxn82iaC1Q3FdnQnkuRS4JwHfbOiTjtve7CGq4IAfJE
 
 state:         Active
 state_updated: 2026-07-01T14:35:00Z

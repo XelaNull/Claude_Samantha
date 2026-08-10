@@ -47,7 +47,22 @@ Every message follows this format exactly:
 - Tag emoji comes last on the header line — it is the at-a-glance type indicator.
 - Append-order is **canonical chronology** — the timestamp is metadata, not the source of truth.
 - One logical update = one atomic append. Never split a single message across two appends.
-- **Atomic write**: always write-temp-then-rename (never write in-place to shared files):
+- **Post via `coord-send.sh` — the only supported way to post a message (PROTOCOL
+  1.4.0).** It builds the header, appends the body, SSH-signs the whole thing, and
+  does the write-temp-then-rename append atomically — all in one step:
+  ```bash
+  coord-send.sh --identity <my-id> --dir <coord-dir> --to <recipient> --tag STATUS --body "..."
+  ```
+  **Hand-appending (the raw `mv`/`cat`/`echo` shape below) is DEPRECATED and
+  produces an unsigned message.** Once a seat's tooling is at 1.4.0 there is no
+  supported way to post unsigned (README.md § "Sending: always signed, hard-fail
+  on sign failure") — a hand-appended message reads as `⚠️ UNVERIFIED` under
+  `coord-verify.sh` and gets hard-blocked by `coordination-precommit-hook.sh`
+  under `--strict` unless it happens to match one of the three narrow bootstrap/
+  dead-man exemptions (see § "Signature block" below and README.md § Message
+  Authenticity — those exemptions are NOT a general-purpose escape hatch). This
+  snippet is kept only as the underlying atomic-write PATTERN `coord-send.sh`
+  itself is built on, for reference — never call it directly to post a message:
   ```bash
   TMPFILE=$(mktemp "$MAILBOX_FILE.XXXXXX")
   cat "$MAILBOX_FILE" > "$TMPFILE"
@@ -61,6 +76,29 @@ Every message follows this format exactly:
   > Negative claims are in scope on purpose: "the file is still untouched," based on a read taken minutes ago, is the same defect wearing the opposite sign.
   > `coord-evidence-lint.sh` mechanizes this — with a stated ceiling: it checks that evidence is *present* and output-shaped, not that it is *true*. A fabricated `state=MERGED` still passes. Its real value is converting "wrote a confident sentence" into "had to produce something shaped like output," which catches the omission failure mode (the common one) if not the fabrication one.
 - **Message-log entries: append-only at true EOF via shell `>>`** (or the write-temp-then-rename pattern above) — never anchor-based Edit. A concurrent heartbeat daemon may have appended past your anchor since your last read, and an anchor-based edit inserts mid-file, defeating tail-diff addressing. Structured header/roster fields (`watcher_pid`, `heartbeat_pid`, `state`, `last_active`, `queue_depth`) are the opposite: updated in place via Edit, never appended — see ROSTER-template.md.
+- **Signature block (PROTOCOL 1.4.0 — Message Authenticity).** `coord-send.sh` appends a `<!-- SIG v1 ... -->` block immediately after every message it posts:
+  ```
+  <!-- SIG v1
+  namespace: samantha-coord
+  signer: <FROM identity>
+  bytes: <exact byte length of the signed region: header line + \n + body + \n>
+  -----BEGIN SSH SIGNATURE-----
+  <ssh-keygen -Y sign output>
+  -----END SSH SIGNATURE-----
+  -->
+  ```
+  **Machine-generated only — never hand-author a SIG block.** It is produced by
+  `coord-send.sh` at the moment of posting (`ssh-keygen -Y sign`, namespace
+  `samantha-coord`) and checked by `coord-verify.sh` against `<coord-dir>/allowed_signers`.
+  The `bytes:` line is NOT a lint aid — `coord-verify.sh` reads exactly that
+  many raw bytes starting at the header line to find the signed region, which
+  is what makes message-boundary detection exact instead of a heuristic that
+  can misparse a body quoting a prior header on its own line (2026-08-09
+  hardening; see coord-verify.sh's header comment). A message with no SIG
+  block reads as `⚠️ UNVERIFIED`, not an error — legacy/pre-amendment history
+  and the bootstrap-handshake message shapes are expected to have none. See
+  README.md § Message Authenticity (SSH signing) for the full mechanism, key
+  storage, and the hard-block this enables.
 
 ---
 
@@ -80,6 +118,15 @@ Every message follows this format exactly:
 | PROCESS-NOTE | 💡 | Proposes a protocol change; obligates Orchestrator to full review | ratification or counter-proposal |
 | ASSIGN-IDENTITY | 🤝 | Orchestrator assigns a stable identity to a newborn Implementer (bootstrap handshake) | ACK from the Implementer after adopting |
 
+**PROTOCOL 1.4.0 — key material during bootstrap.** A newborn's first `🛰️ HEADS-UP`
+(via `bootstrap-identity.sh --provision`) carries a `pubkey: <raw-pubkey-line>`
+field in its body — the Orchestrator's `🤝 ASSIGN-IDENTITY` reply enrolls it
+under the assigned name. Neither message is itself SSH-signed (see § Message
+Grammar above and two of coord-verify.sh's three exemptions, the
+bootstrap-handshake ones) — this is the
+handshake that BOOTSTRAPS the signing trust root, so nothing yet exists to
+verify them against.
+
 ---
 
 ## Example Messages
@@ -92,6 +139,31 @@ Every message follows this format exactly:
 **WO-7: Add retry backoff to the job queue worker**
 
 See WORK-ORDER-template.md for the full format.
+```
+
+### HANDOFF, signed (PROTOCOL 1.4.0 — the shape coord-send.sh actually writes)
+
+`coord-send.sh` appends the `<!-- SIG v1 ... -->` block immediately after the
+body, no blank line before it. Illustrative only — this is not a real
+verifiable signature:
+
+```
+### 2026-07-01T14:30:00Z — orchestrator → impl-alpha — 🤝 HANDOFF
+
+**WO-7: Add retry backoff to the job queue worker**
+
+See WORK-ORDER-template.md for the full format.
+<!-- SIG v1
+namespace: samantha-coord
+signer: orchestrator
+bytes: 176
+-----BEGIN SSH SIGNATURE-----
+U1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAgBS6QZEE4HYhoP1KwOlhqzF7gax
+HCMHBRmZVd7ytpCicAAAAOc2FtYW50aGEtY29vcmQAAAAAAAAABnNoYTUxMgAAAFMAAAAL
+c3NoLWVkMjU1MTkAAABAvIfDut51dz/c+60dB5lxkSILvvPwqpqNpQlL/fLCZooVHSqo0s
+8uv4/uzINu6/Gi5F/zANAvU8IhiDf8iiRbDQ==
+-----END SSH SIGNATURE-----
+-->
 ```
 
 ### STATUS: DONE

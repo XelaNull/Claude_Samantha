@@ -50,6 +50,12 @@
 # Filter helpers: coord-address-filter.sh. Project from --project, roster project:, or
 # identity impl-<project>[-<lane>].
 #
+# SIG-VERDICT ANNOTATION (PROTOCOL 1.4.0): each emitted chunk is annotated inline
+# with its coord-verify.sh --tail verdict (✅ VERIFIED / ⚠️ UNVERIFIED / ❌ INVALID)
+# before the message text — informational only, never affects wake/addressing
+# mechanics or delivery. See README.md § Message Authenticity (SSH signing) and
+# coordination-precommit-hook.sh for the hard-block counterpart.
+#
 # PROTOCOL_VERSION: sourced from PROTOCOL-VERSION beside this script (docs+scripts share stamp).
 #
 # REMOTE CHANNEL (REMOTE-SEATS.md §3.4, 2026-07-18 ratified — hub-only, a SECOND,
@@ -80,6 +86,32 @@ COORD_MONITOR_HOME=$(cd "$(dirname "$0")" && pwd)
 . "$COORD_MONITOR_HOME/coord-address-filter.sh"
 # shellcheck source=coord-presence.sh
 . "$COORD_MONITOR_HOME/coord-presence.sh"
+# shellcheck source=coord-receipt.sh
+. "$COORD_MONITOR_HOME/coord-receipt.sh"
+# shellcheck source=coord-keygen.sh
+# Sourcing (not executing) coord-keygen.sh: pulls in _acquire_signers_lock/
+# _release_signers_lock (generic mkdir-based advisory lock, not actually
+# allowed_signers-specific — see that file's own header) so the
+# .remote-channels auto-write below (PROTOCOL 1.4.0 remote-seat extension)
+# reuses the SAME race-safe read-decide-write pattern coord-keygen.sh's own
+# --enroll already uses, instead of a second, potentially-drifting copy.
+[ -f "$COORD_MONITOR_HOME/coord-keygen.sh" ] && . "$COORD_MONITOR_HOME/coord-keygen.sh"
+# shellcheck source=coord-remote-verify.sh
+# PROTOCOL 1.4.0 remote-seat extension (2026-08-09): shared fetch-a-buffer ->
+# name-it-correctly -> verify-it-against-the-hub's-own-local-allowed_signers
+# helper (verify_remote_buffer), used by remote_emit_new below AND
+# coordination-precommit-hook.sh — one definition so the two can never drift
+# on how a remote buffer gets verified. verify_remote_buffer itself stays
+# BEST-EFFORT (remote_emit_new checks for its presence before calling it —
+# a missing/erroring coord-verify.sh never blocks message delivery, same
+# posture as the local channel's SIG-verdict annotation).
+#
+# coord_remote_shquote, defined in the SAME file (round-5, 2026-08-09 —
+# Cipher CRITICAL RCE fix), is NOT best-effort: it is a hard dependency for
+# --remote-host, enforced right after arg parsing below (see the ERROR/exit 2
+# check) — this script refuses to arm the remote channel at all rather than
+# ever construct a remote command from an unescaped remote-supplied filename.
+[ -f "$COORD_MONITOR_HOME/coord-remote-verify.sh" ] && . "$COORD_MONITOR_HOME/coord-remote-verify.sh"
 PROTOCOL_VERSION="unknown"
 if [ -f "$COORD_MONITOR_HOME/PROTOCOL-VERSION" ]; then
   # shellcheck source=PROTOCOL-VERSION
@@ -159,6 +191,21 @@ if [ -n "$REMOTE_HOST" ] && [ -z "$REMOTE_BUS_DIR" ]; then
   exit 2
 fi
 
+# HARD DEPENDENCY (round-5, 2026-08-09 — Cipher CRITICAL, live-demonstrated
+# RCE): the remote channel constructs ssh command strings from filenames the
+# REMOTE HOST lists — i.e. attacker-controlled if anyone can write into the
+# remote bus dir, exactly the population this extension exists to distrust.
+# coord_remote_shquote (coord-remote-verify.sh) is the ONLY thing standing
+# between that and command injection. This used to be sourced best-effort
+# ("degrade to unverified-but-functional if missing") because the file's ONLY
+# job was thought to be optional signature verification — that framing
+# predates the RCE finding and is no longer safe: a missing quoting helper
+# must never silently fall back to unescaped interpolation. Refuse to arm.
+if [ -n "$REMOTE_HOST" ] && ! command -v coord_remote_shquote >/dev/null 2>&1; then
+  echo "ERROR: --remote-host requires coord-remote-verify.sh beside this script (missing coord_remote_shquote — the shell-quoting helper required to safely build remote commands from remote-host-supplied filenames; see advanced/REMOTE-SEATS.md § Message Authenticity)." >&2
+  exit 2
+fi
+
 if [ -n "$REMOTE_HOST" ] && [ "$POLL" -lt 2 ] 2>/dev/null; then
   printf '┃ coord-monitor: --poll %s below the §3.4 remote-channel floor — clamping to 2s\n' "$POLL"
   POLL=2
@@ -195,29 +242,67 @@ if [ -n "$REMOTE_HOST" ]; then
   remote_offset_file() { printf '%s/remote.%s.off' "$STATEDIR" "$1"; }
 
   # ONE ssh exec per sweep for the common case: "MSG <name> <size>" for every
-  # watched bus/*.md (excluding the hub's own mirrored outbox, same STAR
-  # no-self-watch exclusion as the local watched()) plus "PRES <name> <mtime>"
-  # for every .presence/* file. Embedded single-quoted, same reasoning as
-  # coord-send.sh's mirror ship command (see its header): the script is 100%
-  # program-constructed from our own vars, grep-verified to contain zero
-  # embedded single quotes, and this ALSO avoids any pipe/stdin trickery since
-  # there's no payload competing for stdin here at all (read-only listing).
+  # *.md in the bus dir plus "PRES <name> <mtime>" for every .presence/* file.
+  # Round-5 (2026-08-09, Rook BLOCKER): this used to filter self/QUEUE.md/
+  # PROJECTS.md/queue-*.md server-side (and had DRIFTED from the local
+  # watched()'s exclusion set — missing archives entirely). Filtering now
+  # happens LOCALLY, uniformly, via remote_should_process_name() below (which
+  # composes the shared coord_is_seat_outbox_basename() predicate with self-
+  # exclusion) — this script lists everything and applies ONE filter after
+  # the fact, instead of maintaining a second, independently-drifting
+  # exclusion list embedded in remote-executed shell text.
+  # Embedded single-quoted: the script is 100% program-constructed from our
+  # own vars ($REMOTE_BUS_DIR — a local, operator-supplied CLI arg, never
+  # remote-supplied), grep-verified to contain zero embedded single quotes
+  # (see remote_sweep_sizes below), and this ALSO avoids any pipe/stdin
+  # trickery since there's no payload competing for stdin here at all
+  # (read-only listing).
+  #
+  # ROUND-6 (2026-08-09, Cipher — live-demonstrated): the wire format below
+  # is ONE RECORD PER LINE ("MSG <name> <size>" / "PRES <name> <mtime>"),
+  # parsed by sweep_remote()'s `while IFS=' ' read -r kind name val` on the
+  # RECEIVING side. A real filesystem permits a literal embedded NEWLINE (or
+  # CR) in a filename — only "/" and NUL are forbidden. A file named e.g.
+  # "a-evil.md\nMSG victim.md 999999999" gets listed here as ONE $f, but
+  # `printf "MSG %s %s\n" "$f" ...` then emits it as TWO lines on the wire —
+  # the second one a fully-formed, attacker-chosen FAKE record. Cipher
+  # live-confirmed this poisons a DIFFERENT peer's offset tracker: the fake
+  # oversized size baselines "victim.md" artificially high, so its real
+  # (smaller) subsequent growth hits the "rewritten/archived, baseline reset"
+  # branch in remote_emit_new and is silently DISCARDED — never fetched,
+  # never verified, no error. This is a distinct sink from the round-5
+  # command-injection fix (that one targeted the FETCH command; this one
+  # targets the LISTING protocol itself) and needed its own fix: reject any
+  # name containing an embedded newline/CR at the point it's listed, before
+  # it can ever be split into extra fake wire records. Consumption-side
+  # defense in depth for the same class of bad name lives in
+  # coord-remote-verify.sh's verify_remote_buffer (extended alongside this).
   remote_sweep_script() {
     cat <<REMOTESCRIPT
 cd "$REMOTE_BUS_DIR" 2>/dev/null || exit 0
+_rc_nl=\$(printf "\nX"); _rc_nl=\${_rc_nl%X}
+_rc_cr=\$(printf "\rX"); _rc_cr=\${_rc_cr%X}
 for f in *.md; do
   [ -e "\$f" ] || continue
-  [ "\$f" = "$IDENT.md" ] && continue
-  [ "\$f" = "QUEUE.md" ] && continue
-  [ "\$f" = "PROJECTS.md" ] && continue
-  case "\$f" in queue-*.md) continue;; esac
+  case "\$f" in *"\$_rc_nl"*|*"\$_rc_cr"*) continue ;; esac
   printf "MSG %s %s\n" "\$f" "\$(wc -c < "\$f" | tr -d " ")"
 done
 [ -d .presence ] && for f in .presence/*; do
   [ -e "\$f" ] || continue
+  case "\$f" in *"\$_rc_nl"*|*"\$_rc_cr"*) continue ;; esac
   printf "PRES %s %s\n" "\$(basename "\$f")" "\$(stat -c %Y "\$f" 2>/dev/null || echo 0)"
 done
 REMOTESCRIPT
+  }
+
+  # remote_should_process_name <name> — composes the shared
+  # coord_is_seat_outbox_basename() infra-file exclusion with this monitor's
+  # own IDENT-specific self-exclusion (excluding the hub's own mirrored
+  # outbox from the remote bus, same STAR no-self-watch rule as the local
+  # channel's watched()).
+  remote_should_process_name() {
+    [ "$1" = "$IDENT.md" ] && return 1
+    coord_is_seat_outbox_basename "$1"
   }
 
   remote_sweep_sizes() {
@@ -227,11 +312,19 @@ REMOTESCRIPT
       return 1
       ;;
     esac
-    ssh -o BatchMode=yes -o ConnectTimeout=10 "$REMOTE_HOST" "bash -c '$script'" 2>/dev/null
+    # -n: redirect ssh's own stdin from /dev/null. Round-5 (2026-08-09):
+    # sweep_remote() below runs this via `done < <(remote_sweep_sizes)`,
+    # redirecting fd0 for its WHOLE loop body (including remote_emit_new's
+    # own ssh call) to this process substitution's pipe. Without -n, ssh (no
+    # -n/-t) reads+forwards local stdin by default regardless of whether the
+    # remote command uses it — it would race to drain that pipe itself,
+    # silently truncating the outer `read` loop's remaining input. None of
+    # this script's remote commands read stdin; -n removes the hazard.
+    ssh -n -o BatchMode=yes -o ConnectTimeout=10 "$REMOTE_HOST" "bash -c '$script'" 2>/dev/null
   }
 
   remote_emit_new() {
-    local name="$1" cur="$2" of prev chunk filtered
+    local name="$1" cur="$2" of prev chunk chunk_raw filtered verify_out q_bus q_name
     of=$(remote_offset_file "$name"); prev=$(cat "$of" 2>/dev/null || echo 0)
     [ -z "${cur:-}" ] && return 0
     if [ "$cur" -lt "$prev" ]; then
@@ -240,7 +333,18 @@ REMOTESCRIPT
       printf '%s' "$cur" > "$of"; return 0
     fi
     if [ "$cur" -gt "$prev" ]; then
-      chunk=$(ssh -o BatchMode=yes -o ConnectTimeout=10 "$REMOTE_HOST" "tail -c +$((prev + 1)) '$REMOTE_BUS_DIR/$name'" 2>/dev/null) || chunk=""
+      # Round-5 CRITICAL (2026-08-09, Cipher — live-demonstrated RCE): $name
+      # came from a `for f in *.md` listing run ON THE REMOTE HOST — as
+      # trustworthy as whoever can write a file into the remote bus dir,
+      # exactly the population this extension exists to distrust. A file
+      # named e.g. "x'; id; echo '.md" used to execute arbitrary code here,
+      # before any signature check ever ran. coord_remote_shquote (hard
+      # dependency, enforced at arg-parse time above) closes this — every
+      # value spliced into the remote command string goes through it.
+      q_bus=$(coord_remote_shquote "$REMOTE_BUS_DIR")
+      q_name=$(coord_remote_shquote "$name")
+      chunk=$(ssh -n -o BatchMode=yes -o ConnectTimeout=10 "$REMOTE_HOST" "tail -c +$((prev + 1)) $q_bus/$q_name" 2>/dev/null) || chunk=""
+      chunk_raw="$chunk"
       printf '%s' "$cur" > "$of"
       if [ "$ROLE" = "implementer" ]; then
         if ! filtered=$(spoke_filter_delta "$IDENT" "$PROJECT" "$chunk"); then
@@ -250,6 +354,22 @@ REMOTESCRIPT
       fi
       printf '┃ COORD ▼ new message on %s (remote) · %s bytes @ %s\n' "$name" "$((cur - prev))" "$(date -u +%FT%TZ)"
       printf '%s' "$chunk"
+      # PROTOCOL 1.4.0 remote-seat extension (2026-08-09): informational
+      # SIG-verdict annotation, same as the local channel's emit_new — this
+      # used to be entirely missing for the remote channel (REMOTE-SEATS.md's
+      # own documented scoping gap; see that file's § Message Authenticity
+      # for the closed history). Verified against the RAW (pre-spoke-filter)
+      # chunk, same reasoning as the local channel: signature validity is a
+      # property of the underlying message, independent of whether THIS
+      # seat's addressing filter chooses to display it. Batched block AFTER
+      # the message text, not interleaved (same round-2/item-17-reversion
+      # reasoning as the local channel — see emit_new below). Best-effort:
+      # a missing coord-remote-verify.sh/coord-verify.sh never blocks
+      # delivery of the message itself, same posture as the local channel.
+      if command -v verify_remote_buffer >/dev/null 2>&1 && [ -x "$COORD_MONITOR_HOME/coord-verify.sh" ]; then
+        verify_out=$(printf '%s' "$chunk_raw" | verify_remote_buffer "$DIR" "$name" "$COORD_MONITOR_HOME/coord-verify.sh" 2>/dev/null | grep -E '^(✅|⚠️|❓|❌)') || true
+        [ -n "$verify_out" ] && printf '%s\n' "$verify_out" | sed 's/^/┃ COORD SIG /'
+      fi
       printf '┃ COORD ▲ end %s (remote) — re-run coord-status.sh if you acted on a DEPLOY/DECISION\n' "$name"
     fi
     return 0
@@ -283,7 +403,7 @@ REMOTESCRIPT
     while IFS=' ' read -r kind name val; do
       [ -z "$kind" ] && continue
       case "$kind" in
-        MSG)  remote_emit_new "$name" "$val" ;;
+        MSG)  remote_should_process_name "$name" && remote_emit_new "$name" "$val" ;;
         PRES) remote_presence_check "$name" "$val" ;;
       esac
     done < <(remote_sweep_sizes)
@@ -291,8 +411,44 @@ REMOTESCRIPT
 
   # Initialize offsets to CURRENT end so arm streams only NEW messages, never replays history.
   while IFS=' ' read -r kind name val; do
-    [ "$kind" = "MSG" ] && printf '%s' "$val" > "$(remote_offset_file "$name")"
+    [ "$kind" = "MSG" ] && remote_should_process_name "$name" && printf '%s' "$val" > "$(remote_offset_file "$name")"
   done < <(remote_sweep_sizes)
+
+  # .remote-channels auto-write (PROTOCOL 1.4.0 remote-seat extension,
+  # 2026-08-09, real gap 2): coordination-precommit-hook.sh has no way to
+  # know a remote channel even exists (a remote bus dir lives on a different
+  # host by definition — nothing on the local filesystem points at it)
+  # unless something writes that down. This used to be left as a manual
+  # documentation step in REMOTE-SEATS.md's Cutover Checklist — exactly the
+  # kind of quiet gap this whole amendment has been closing elsewhere (an
+  # operator forgetting one manual step silently leaves the hard-block blind
+  # to a whole channel). Auto-written HERE, at arm time, idempotent
+  # (de-duplicated, one line per distinct host+bus-dir pair), lock-guarded
+  # against a concurrent second remote channel arming at the same instant.
+  # Gitignored by convention in the ADOPTING project (site-specific
+  # host/bus paths never get committed — same rule as item 6 of the Cutover
+  # Checklist below).
+  _RC_FILE="$DIR/.remote-channels"
+  _RC_LINE="$REMOTE_HOST $REMOTE_BUS_DIR"
+  if command -v _acquire_signers_lock >/dev/null 2>&1; then
+    if _acquire_signers_lock "$_RC_FILE"; then
+      touch "$_RC_FILE" 2>/dev/null || true
+      if ! grep -qxF "$_RC_LINE" "$_RC_FILE" 2>/dev/null; then
+        _rc_tmp=$(mktemp "$_RC_FILE.XXXXXX") || _rc_tmp=""
+        if [ -n "$_rc_tmp" ]; then
+          cat "$_RC_FILE" > "$_rc_tmp" 2>/dev/null || true
+          printf '%s\n' "$_RC_LINE" >> "$_rc_tmp"
+          mv "$_rc_tmp" "$_RC_FILE"
+        fi
+        unset _rc_tmp
+      fi
+      _release_signers_lock "$_RC_FILE"
+    else
+      printf '┃ coord-monitor ⚠️ could not lock %s to register this remote channel — coordination-precommit-hook.sh may not see it. Add "%s" to it manually.\n' \
+        "$_RC_FILE" "$_RC_LINE" >&2
+    fi
+  fi
+  unset _RC_FILE _RC_LINE
 
   printf '┃ coord-monitor ARMED for %s (REMOTE channel, §3.4) @ %s — host: %s · bus: %s · poll: %ss\n' \
     "$IDENT" "$(date -u +%FT%TZ)" "$REMOTE_HOST" "$REMOTE_BUS_DIR" "$POLL"
@@ -324,9 +480,12 @@ watched() {
   for f in "$DIR"/*.md; do
     [ -e "$f" ] || continue
     b=$(basename "$f")
-    case "$b" in
-      "$IDENT.md"|QUEUE.md|PROJECTS.md|queue-*.md|*.archive.md) continue;;
-    esac
+    [ "$b" = "$IDENT.md" ] && continue
+    # Round-5 (2026-08-09, Rook BLOCKER): shared with the remote channel's
+    # remote_should_process_name() and coordination-precommit-hook.sh's check
+    # 1c — see coord-address-filter.sh's coord_is_seat_outbox_basename for why
+    # this used to be three independently-drifting exclusion lists.
+    coord_is_seat_outbox_basename "$b" || continue
     printf '%s\n' "$f"
   done
 }
@@ -345,6 +504,12 @@ emit_new() {
   fi
   if [ "$cur" -gt "$prev" ]; then
     chunk=$(tail -c "+$((prev+1))" "$f")
+    # Lines in the RAW (pre-filter) chunk — used only to size the coord-verify.sh
+    # --tail window below, so a project-filtered spoke still verifies against the
+    # actual file region the new bytes came from, not the (possibly smaller)
+    # post-filter chunk.
+    raw_lines=$(printf '%s' "$chunk" | wc -l | tr -d ' ')
+    [ -z "${raw_lines:-}" ] && raw_lines=0
     # Advance offset + Rule-4 receipt BEFORE wake decision — silent catch-up must not
     # re-deliver on the next sweep (PROTOCOL 1.2.1 addressed wake filter).
     printf '%s' "$cur" > "$of"
@@ -354,7 +519,9 @@ emit_new() {
     # manual `wc -c > receipt`. GROWTH PATH ONLY: on shrink/rotation (above) the receipt is
     # deliberately left stale-large so the hook's F6 forces one catch-up read of the new file.
     # Spoke silent-filter still advances receipt: the bytes were observed; they were not for us.
-    printf '%s' "$cur" > "$DIR/.watch-state/$IDENT/$(basename "$f").size"
+    # Two-field offset+verified_sha256 format (item 1, 2026-08-09) via coord-receipt.sh's
+    # write_receipt — see that file's header for why a bare integer was forgeable.
+    write_receipt "$DIR/.watch-state/$IDENT/$(basename "$f").size" "$cur" "$f" 2>/dev/null || true
 
     if [ "$ROLE" = "implementer" ]; then
       # Hub outbox: project filter. Same-project peer outboxes: emit whole delta
@@ -371,6 +538,21 @@ emit_new() {
     # One tight burst → Monitor batches it into a single notification carrying the whole message.
     printf '┃ COORD ▼ new message on %s · %s bytes @ %s\n' "$(basename "$f")" "$((cur-prev))" "$(date -u +%FT%TZ)"
     printf '%s' "$chunk"
+    # PROTOCOL 1.4.0 — informational SIG-verdict annotation only; never affects
+    # wake/addressing mechanics. Best-effort: a missing/erroring coord-verify.sh
+    # never blocks delivery of the message itself. Printed as a single batched
+    # block AFTER the message text, not interleaved per-message: an earlier
+    # per-message interleaving (item 17, 2026-08-09) paired the Nth verdict
+    # with the Nth displayed message block, but on the spoke path the verdict
+    # list is computed from coord-verify.sh's raw unfiltered window while the
+    # displayed chunk has messages dropped by spoke_filter_delta — the two
+    # can disagree in length/order, so ordinal pairing silently mispairs a
+    # verdict with the wrong message (Rook, round-2 review). Not worth
+    # hardening pairing further for an informational-only annotation.
+    if [ -x "$COORD_MONITOR_HOME/coord-verify.sh" ]; then
+      verify_out=$("$COORD_MONITOR_HOME/coord-verify.sh" --dir "$DIR" --file "$f" --tail "$((raw_lines + 5))" 2>/dev/null | grep -E '^(✅|⚠️|❓|❌)') || true
+      [ -n "$verify_out" ] && printf '%s\n' "$verify_out" | sed 's/^/┃ COORD SIG /'
+    fi
     printf '┃ COORD ▲ end %s — re-run coord-status.sh if you acted on a DEPLOY/DECISION\n' "$(basename "$f")"
   fi
   return 0

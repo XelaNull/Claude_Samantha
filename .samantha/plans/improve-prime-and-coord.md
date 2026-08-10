@@ -1,7 +1,7 @@
 # Plan: Coordination as skill-based modes (Solo + Star)
 
 Status: **PHASE 5 (rollout) DONE on disk** · seats need **re-arm** · **still no git push**  
-PROTOCOL **1.3.0**
+PROTOCOL **1.4.0**
 
 ## Phases
 
@@ -25,8 +25,11 @@ PROTOCOL **1.3.0**
 
 Re-arm each Nebuspace seat per `ROLLOUT-PROTOCOL-1.3.0.md`. Confirm banner `PROTOCOL 1.3.0` + `project=…`. Smoke cross-project silence.
 
+## Shipped since
+
+- **SSH message authenticity** — shipped in PROTOCOL 1.4.0 (2026-08-09): `coord-keygen.sh` / `coord-verify.sh`, `coord-send.sh` always signs, `coordination-precommit-hook.sh` hard-blocks on invalid/non-exempt-unsigned mail (forward-only), bootstrap key handshake folded into `bootstrap-identity.sh` + the Orchestrator's `ASSIGN-IDENTITY` reply.
+
 ## Still deferred
 
-- SSH message authenticity
 - Memory redesign
 - Git commit/push of Prime (ask when ready)

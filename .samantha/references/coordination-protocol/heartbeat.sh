@@ -161,6 +161,13 @@ PROTOCOL_VERSION="unknown"
 [[ -f "$HB_HOME/PROTOCOL-VERSION" ]] && . "$HB_HOME/PROTOCOL-VERSION"
 # shellcheck source=coord-presence.sh
 [[ -f "$HB_HOME/coord-presence.sh" ]] && . "$HB_HOME/coord-presence.sh"
+# shellcheck source=coord-keygen.sh
+# PROTOCOL 1.4.0 (Message Authenticity): sourcing (not executing) coord-keygen.sh
+# pulls in ensure_signing_key / sign_message_file — the SAME shared helpers
+# coord-send.sh uses, so this appender can never drift from coord-send.sh on
+# signing mechanics. Its CLI dispatch is guarded behind a BASH_SOURCE==$0
+# check, so sourcing here never runs its arg-parsing/dispatch.
+[[ -f "$HB_HOME/coord-keygen.sh" ]] && . "$HB_HOME/coord-keygen.sh"
 
 # F+: help exits before any pidfile write (pidfile is claimed later).
 while [[ $# -gt 0 ]]; do
@@ -581,11 +588,17 @@ append_heartbeat() {
   # Body must include ⚡ IDLE-KICK so coord-monitor's self-nudge path wakes THIS seat
   # (STAR no-self-watch otherwise leaves implementers forever idle until a human pokes).
   # M1: every heartbeat has a unique UTC timestamp → always unique content → watcher wakes.
+  #
+  # PROTOCOL 1.4.0: build the message into a temp file, sign THAT file, then
+  # append the signed file + SIG block together — sign or skip, never post
+  # unsigned (dead-man-switch backstop already tolerates a missed cycle;
+  # WATCHER_DEAD_TICKS exists for exactly this kind of transient gap).
+  local hb_tmp; hb_tmp=$(mktemp "${TMPDIR:-/tmp}/coord-hb.XXXXXX")
   {
     # Hub outbox is every spoke's inbox — address self-nudges as IDENTITY → IDENTITY
     # and tag SELF-NUDGE so spokes do not treat hub IDLE-KICK imperatives as HANDOFFs
     # (CC PROCESS-NOTE 2026-07-27; WO-PROCESS-HUB-IDLE-KICK-ADDRESS).
-    printf '\n### %s — %s → %s — 💓 HEARTBEAT [self-nudge]\n\n' "$ts" "$IDENTITY" "$IDENTITY"
+    printf '### %s — %s → %s — 💓 HEARTBEAT [self-nudge]\n\n' "$ts" "$IDENTITY" "$IDENTITY"
     if [[ "$ROLE" == "orchestrator" ]]; then
       printf '**SELF-NUDGE (hub only — spokes ignore for action)**\n\n'
     fi
@@ -596,15 +609,44 @@ append_heartbeat() {
     printf 'Do **not** answer with "standing by" / "no action" and stop. Post a 🛰️ HEADS-UP naming the next target, then build. (coord-monitor self-nudge delivers this wake; peers also see the HEARTBEAT.)\n\n'
     printf '**Exception (2026-07-18 ratified amendment):** unless an explicit Max pace-down or a declared HOLD (name it) is active — those override; standing by is then correct. This is NOT a license to invent your own reason to idle; only a Max-issued pace-down or a HOLD you can point to by name counts.\n'
     if [[ -n "$discover_block" ]]; then
-      printf '%s' "$discover_block"
+      # $(...) strips the trailing newline printf built into discover_block —
+      # restore it here. Without this, the SIG block glues onto the same line
+      # as this text (no newline before it), which coord-verify.sh's
+      # line-based SIG_START match then simply cannot find.
+      printf '%s\n' "$discover_block"
     fi
-  } >> "$MY_FILE"
+  } > "$hb_tmp"
+
+  if ! command -v ensure_signing_key >/dev/null 2>&1; then
+    echo "WARN: coord-keygen.sh not found beside heartbeat.sh ($HB_HOME) — cannot sign; skipping this heartbeat cycle (never posting unsigned)." >&2
+    rm -f "$hb_tmp"
+    return
+  fi
+  local hb_privkey; hb_privkey=$(ensure_signing_key "$HB_HOME/coord-keygen.sh" "$IDENTITY" "$COORD_DIR")
+  if [[ -z "$hb_privkey" ]]; then
+    echo "WARN: signing key unavailable for $IDENTITY — skipping this heartbeat cycle (never posting unsigned)." >&2
+    rm -f "$hb_tmp"
+    return
+  fi
+  local hb_sig; hb_sig=$(sign_message_file "$hb_privkey" "$IDENTITY" "$hb_tmp")
+  if [[ $? -ne 0 || -z "$hb_sig" ]]; then
+    echo "WARN: ssh-keygen -Y sign FAILED for this heartbeat cycle — skipping the append (never posting unsigned)." >&2
+    rm -f "$hb_tmp"
+    return
+  fi
+
+  { printf '\n'; cat "$hb_tmp"; printf '%s' "$hb_sig"; } >> "$MY_FILE"
+  rm -f "$hb_tmp"
 
   # M4: confirm append persisted.
-  if ! tail -8 "$MY_FILE" 2>/dev/null | grep -q "IDLE-KICK"; then
+  # PROTOCOL 1.4.0: window widened 8 → 40 lines — the appended SIG block (~9
+  # lines) now sits after the body text this check greps for, so a narrow
+  # tail window can push IDLE-KICK out of range and false-WARN on a landed,
+  # correctly-signed append.
+  if ! tail -40 "$MY_FILE" 2>/dev/null | grep -q "IDLE-KICK"; then
     echo "WARN: heartbeat/IDLE-KICK append did not persist in $MY_FILE" >&2
   else
-    echo "[heartbeat] HEARTBEAT+IDLE-KICK appended at $ts (idle~${idle_s}s)."
+    echo "[heartbeat] HEARTBEAT+IDLE-KICK appended at $ts (idle~${idle_s}s), signed."
     # Stdout banner — also matches notify_on_output if this shell is monitored.
     printf '┃ IDLE-KICK ▼ %s idle~%ss — start idle_policy work (do not stand by) @ %s\n' \
       "$IDENTITY" "$idle_s" "$ts"
@@ -637,11 +679,48 @@ trip_watcher_down_alarm() {
   # Guard: skip the append if MY_FILE is missing, but still exit — the alarm's
   # dead-man exit is unconditional; a missing presence file must not suppress it.
   if [[ -f "$MY_FILE" ]]; then
-    printf '\n### %s — %s → %s — ⚠️ WATCHER-DOWN [channel: %s]\n\nWatcher PID %s (channel: %s) is dead; this lane'"'"'s inbox on that channel is DEAF until it is re-armed. Heartbeat is self-terminating as a dead-man wake signal for its own session. Re-arm with:\n\n  %s\n' \
-      "$ts" "$IDENTITY" "$addressee" "$label" "$pid" "$label" "$rearm_cmd" >> "$MY_FILE"
+    # PROTOCOL 1.4.0: try to sign — the common case, and when it succeeds this
+    # message is fully verified like everything else. WATCHER-DOWN is the ONE
+    # message this protocol must never silently swallow for auth-layer reasons
+    # ("the only way a backgrounded process can wake a dormant agent session"),
+    # so ONLY on a signing failure does this fall back to an UNSIGNED append —
+    # loudly flagged in the body, never silent. See coord-verify.sh's
+    # exemption (c) (TAG starts with "⚠️ " AND the SIGNING-FAILED sentinel is
+    # the body's first substantive line — shared with HOLD-WAKE-UNACKED
+    # below, collapsed into one sentinel exemption 2026-08-09) — a SIGNED
+    # WATCHER-DOWN still gets full verification and a tampered/forged one
+    # still hard-fails as INVALID same as any other message.
+    local wd_tmp; wd_tmp=$(mktemp "${TMPDIR:-/tmp}/coord-wd.XXXXXX")
+    printf '### %s — %s → %s — ⚠️ WATCHER-DOWN [channel: %s]\n\nWatcher PID %s (channel: %s) is dead; this lane'"'"'s inbox on that channel is DEAF until it is re-armed. Heartbeat is self-terminating as a dead-man wake signal for its own session. Re-arm with:\n\n  %s\n' \
+      "$ts" "$IDENTITY" "$addressee" "$label" "$pid" "$label" "$rearm_cmd" > "$wd_tmp"
+
+    local wd_sig="" wd_signed=0
+    if command -v ensure_signing_key >/dev/null 2>&1; then
+      local wd_privkey; wd_privkey=$(ensure_signing_key "$HB_HOME/coord-keygen.sh" "$IDENTITY" "$COORD_DIR")
+      if [[ -n "$wd_privkey" ]]; then
+        wd_sig=$(sign_message_file "$wd_privkey" "$IDENTITY" "$wd_tmp")
+        [[ $? -eq 0 && -n "$wd_sig" ]] && wd_signed=1
+      fi
+    fi
+
+    if [[ "$wd_signed" -eq 1 ]]; then
+      { printf '\n'; cat "$wd_tmp"; printf '%s' "$wd_sig"; } >> "$MY_FILE"
+    else
+      echo "WARN: could not sign the WATCHER-DOWN alert — posting UNSIGNED, loudly flagged. This is the one message the protocol never silently swallows for auth-layer reasons." >&2
+      {
+        printf '\n### %s — %s → %s — ⚠️ WATCHER-DOWN [channel: %s]\n\n' "$ts" "$IDENTITY" "$addressee" "$label"
+        printf '[SIGNING-FAILED — unauthenticated, verify liveness by other means]\n\n'
+        printf 'Watcher PID %s (channel: %s) is dead; this lane'"'"'s inbox on that channel is DEAF until it is re-armed. Heartbeat is self-terminating as a dead-man wake signal for its own session. Re-arm with:\n\n  %s\n' \
+          "$pid" "$label" "$rearm_cmd"
+      } >> "$MY_FILE"
+    fi
+    rm -f "$wd_tmp"
 
     # M4: read back (tail + grep WATCHER-DOWN) to confirm the append persisted.
-    if ! tail -10 "$MY_FILE" 2>/dev/null | grep -q "WATCHER-DOWN"; then
+    # PROTOCOL 1.4.0: window widened 10 → 40 lines — same reason as the
+    # IDLE-KICK check above: a signed WATCHER-DOWN carries a ~9-line SIG
+    # block after the body, which a narrow tail window can push out of range.
+    if ! tail -40 "$MY_FILE" 2>/dev/null | grep -q "WATCHER-DOWN"; then
       echo "WARN: WATCHER-DOWN alert append did not persist in $MY_FILE" >&2
     fi
   else
@@ -761,8 +840,13 @@ append_hold_check() {
   ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
   nonce="$ts"
   addressee=$(hold_addressee)
+
+  # PROTOCOL 1.4.0: sign or skip, same policy as append_heartbeat — this is a
+  # periodic liveness probe with its own retry cadence (HOLD_ACK_TICKS), so a
+  # skipped cycle costs nothing and must never post unsigned.
+  local hc_tmp; hc_tmp=$(mktemp "${TMPDIR:-/tmp}/coord-hc.XXXXXX")
   {
-    printf '\n### %s — %s → %s — 💓 HEARTBEAT [HOLD:%s · HOLD-CHECK:%s]\n\n' \
+    printf '### %s — %s → %s — 💓 HEARTBEAT [HOLD:%s · HOLD-CHECK:%s]\n\n' \
       "$ts" "$IDENTITY" "$addressee" "$HOLD_NAME" "$nonce"
     printf 'HOLD **%s** is active — IDLE-KICK is damped, so this seat is deliberately quiet.\n' "$HOLD_NAME"
     printf 'This is the periodic liveness check (every %ss).\n\n' "$HOLD_CHECK_INTERVAL"
@@ -771,32 +855,109 @@ append_hold_check() {
     printf 'That ACK does **not** clear the hold (Rule 6 exclusion) — damping continues.\n'
     printf 'No ACK within %s cadence ticks (~%ss) → ⚠️ HOLD-WAKE-UNACKED and this heartbeat exits 43.\n' \
       "$HOLD_ACK_TICKS" "$((HOLD_ACK_TICKS * CADENCE))"
-  } >> "$MY_FILE"
+  } > "$hc_tmp"
+
+  if ! command -v ensure_signing_key >/dev/null 2>&1; then
+    echo "WARN: coord-keygen.sh not found beside heartbeat.sh ($HB_HOME) — cannot sign; skipping this HOLD-CHECK cycle (never posting unsigned)." >&2
+    rm -f "$hc_tmp"
+    return
+  fi
+  local hc_privkey; hc_privkey=$(ensure_signing_key "$HB_HOME/coord-keygen.sh" "$IDENTITY" "$COORD_DIR")
+  if [[ -z "$hc_privkey" ]]; then
+    echo "WARN: signing key unavailable for $IDENTITY — skipping this HOLD-CHECK cycle (never posting unsigned)." >&2
+    rm -f "$hc_tmp"
+    return
+  fi
+  local hc_sig; hc_sig=$(sign_message_file "$hc_privkey" "$IDENTITY" "$hc_tmp")
+  if [[ $? -ne 0 || -z "$hc_sig" ]]; then
+    echo "WARN: ssh-keygen -Y sign FAILED for this HOLD-CHECK cycle — skipping the append (never posting unsigned)." >&2
+    rm -f "$hc_tmp"
+    return
+  fi
+
+  { printf '\n'; cat "$hc_tmp"; printf '%s' "$hc_sig"; } >> "$MY_FILE"
+  rm -f "$hc_tmp"
 
   printf '%s' "$nonce" > "$HOLD_PENDING_FILE"
   printf '0' > "$HOLD_TICKS_FILE"
   printf '%s' "$(now_epoch)" > "$HOLD_LAST_FILE"
 
-  echo "[heartbeat] HOLD-CHECK posted (hold=$HOLD_NAME nonce=$nonce)."
+  echo "[heartbeat] HOLD-CHECK posted (hold=$HOLD_NAME nonce=$nonce), signed."
   printf '┃ HOLD-CHECK ▼ %s hold=%s nonce=%s — agent ACK required within %s ticks\n' \
     "$IDENTITY" "$HOLD_NAME" "$nonce" "$HOLD_ACK_TICKS"
 }
 
 trip_hold_wake_unacked() {
+  # Same dead-man-alarm shape as trip_watcher_down_alarm (2026-08-09 ratified
+  # amendment): a HOLD damping a seat that has gone silently unresponsive is
+  # the same "deaf gap" WATCHER-DOWN exists to close, just detected via a
+  # missed HOLD-CHECK ACK instead of a dead watcher PID — so it gets
+  # identical auth treatment. Try to sign first (the common case — fully
+  # verified like everything else, tamper still caught). ONLY on a genuine
+  # signing failure does this fall back to an UNSIGNED append, loudly flagged
+  # in the body, never silent. See coord-verify.sh's exemption (c) (TAG
+  # starts with "⚠️ " AND the SIGNING-FAILED sentinel is the body's first
+  # substantive line — shared with WATCHER-DOWN above, collapsed into one
+  # sentinel exemption 2026-08-09) — a SIGNED HOLD-WAKE-UNACKED still gets
+  # full verification and a tampered/forged one still hard-fails as INVALID
+  # same as any other message.
   local nonce="$1" ts addressee
   ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
   addressee=$(hold_addressee)
-  {
-    printf '\n### %s — %s → %s — ⚠️ HOLD-WAKE-UNACKED [HOLD:%s · HOLD-CHECK:%s]\n\n' \
-      "$ts" "$IDENTITY" "$addressee" "$HOLD_NAME" "$nonce"
-    printf 'HOLD **%s** was damping IDLE-KICK on this seat, but HOLD-CHECK `%s` went unACKed\n' "$HOLD_NAME" "$nonce"
-    printf 'for %s cadence ticks (~%ss).\n\n' "$HOLD_ACK_TICKS" "$((HOLD_ACK_TICKS * CADENCE))"
-    printf 'A hold damps a seat that is still THERE. Unproven liveness under a hold is the deaf\n'
-    printf 'gap this amendment exists to close, so the heartbeat self-terminates (exit 43 —\n'
-    printf 'distinct from watcher-dead exit 42) to wake the dormant agent session.\n\n'
-    printf 'Re-arm:\n\n    %s --identity %s --role %s --dir %s\n' \
-      "$SCRIPT_ABS" "$IDENTITY" "$ROLE" "$COORD_DIR"
-  } >> "$MY_FILE"
+
+  # Guard: skip the append if MY_FILE is missing, but still exit — the
+  # alarm's dead-man exit is unconditional; a missing presence file must not
+  # suppress it.
+  if [[ -f "$MY_FILE" ]]; then
+    local hw_tmp; hw_tmp=$(mktemp "${TMPDIR:-/tmp}/coord-hw.XXXXXX")
+    {
+      printf '### %s — %s → %s — ⚠️ HOLD-WAKE-UNACKED [HOLD:%s · HOLD-CHECK:%s]\n\n' \
+        "$ts" "$IDENTITY" "$addressee" "$HOLD_NAME" "$nonce"
+      printf 'HOLD **%s** was damping IDLE-KICK on this seat, but HOLD-CHECK `%s` went unACKed\n' "$HOLD_NAME" "$nonce"
+      printf 'for %s cadence ticks (~%ss).\n\n' "$HOLD_ACK_TICKS" "$((HOLD_ACK_TICKS * CADENCE))"
+      printf 'A hold damps a seat that is still THERE. Unproven liveness under a hold is the deaf\n'
+      printf 'gap this amendment exists to close, so the heartbeat self-terminates (exit 43 —\n'
+      printf 'distinct from watcher-dead exit 42) to wake the dormant agent session.\n\n'
+      printf 'Re-arm:\n\n    %s --identity %s --role %s --dir %s\n' \
+        "$SCRIPT_ABS" "$IDENTITY" "$ROLE" "$COORD_DIR"
+    } > "$hw_tmp"
+
+    local hw_sig="" hw_signed=0
+    if command -v ensure_signing_key >/dev/null 2>&1; then
+      local hw_privkey; hw_privkey=$(ensure_signing_key "$HB_HOME/coord-keygen.sh" "$IDENTITY" "$COORD_DIR")
+      if [[ -n "$hw_privkey" ]]; then
+        hw_sig=$(sign_message_file "$hw_privkey" "$IDENTITY" "$hw_tmp")
+        [[ $? -eq 0 && -n "$hw_sig" ]] && hw_signed=1
+      fi
+    fi
+
+    if [[ "$hw_signed" -eq 1 ]]; then
+      { printf '\n'; cat "$hw_tmp"; printf '%s' "$hw_sig"; } >> "$MY_FILE"
+    else
+      echo "WARN: could not sign the HOLD-WAKE-UNACKED alert — posting UNSIGNED, loudly flagged. This is a dead-man alarm the protocol never silently swallows for auth-layer reasons." >&2
+      {
+        printf '\n### %s — %s → %s — ⚠️ HOLD-WAKE-UNACKED [HOLD:%s · HOLD-CHECK:%s]\n\n' \
+          "$ts" "$IDENTITY" "$addressee" "$HOLD_NAME" "$nonce"
+        printf '[SIGNING-FAILED — unauthenticated, verify liveness by other means]\n\n'
+        printf 'HOLD **%s** was damping IDLE-KICK on this seat, but HOLD-CHECK `%s` went unACKed\n' "$HOLD_NAME" "$nonce"
+        printf 'for %s cadence ticks (~%ss).\n\n' "$HOLD_ACK_TICKS" "$((HOLD_ACK_TICKS * CADENCE))"
+        printf 'A hold damps a seat that is still THERE. Unproven liveness under a hold is the deaf\n'
+        printf 'gap this amendment exists to close, so the heartbeat self-terminates (exit 43 —\n'
+        printf 'distinct from watcher-dead exit 42) to wake the dormant agent session.\n\n'
+        printf 'Re-arm:\n\n    %s --identity %s --role %s --dir %s\n' \
+          "$SCRIPT_ABS" "$IDENTITY" "$ROLE" "$COORD_DIR"
+      } >> "$MY_FILE"
+    fi
+    rm -f "$hw_tmp"
+
+    # M4: read back (tail + grep) to confirm the append persisted — window
+    # wide enough to comfortably include a signed message's ~9-line SIG block.
+    if ! tail -40 "$MY_FILE" 2>/dev/null | grep -q "HOLD-WAKE-UNACKED"; then
+      echo "WARN: HOLD-WAKE-UNACKED alert append did not persist in $MY_FILE" >&2
+    fi
+  else
+    echo "WARN: $MY_FILE does not exist. Skipping HOLD-WAKE-UNACKED append but still self-terminating." >&2
+  fi
 
   echo ""
   echo "=== HOLD-WAKE-UNACKED — HEARTBEAT SELF-TERMINATING (exit 43) ==="

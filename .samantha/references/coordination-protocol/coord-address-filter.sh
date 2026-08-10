@@ -83,6 +83,53 @@ protocol_same_project() {
   [ -n "$op" ] && [ "$op" = "$project" ]
 }
 
+# coord_is_seat_outbox_basename <basename>
+#   Returns 0 (true) iff <basename> is a genuine per-seat outbox — a file
+#   whose signed content is expected to satisfy coord-verify.sh's structural
+#   FROM==basename(file) check — i.e. NOT one of the protocol's shared/
+#   infrastructure files (QUEUE.md, PROJECTS.md, a queue-*.md lane file, or
+#   an archive rotation *.archive.md), whose entries legitimately carry a
+#   FROM that differs from the file's own name.
+#
+#   Round-5 (2026-08-09, Rook BLOCKER) + round-6 (2026-08-09, Rook — the 4th
+#   site round-5 missed): FOUR call sites had each grown their OWN
+#   hand-written version of this exclusion set and had already drifted —
+#   coord-monitor.sh's local watched() (hub) excluded all four shapes;
+#   coord-monitor.sh's remote sweep excluded three of four (missing archives);
+#   coordination-precommit-hook.sh's LOCAL check-1b (INBOX_FILES) excluded
+#   two of four (missing PROJECTS.md and queue-*.md — round-5 fixed the other
+#   three sites but missed this one, since it predates the remote extension);
+#   its REMOTE check-1c excluded NONE. A QUEUE.md/PROJECTS.md/queue-*.md/
+#   archive file — not a crafted attack, an ORDINARY deployment that uses a
+#   queue file — would then permanently hard-block every hub commit via a
+#   false structural INVALID. This is now the primary place the exclusion set
+#   is defined; all four call sites (coord-monitor.sh's local watched(), its
+#   remote sweep dispatch, and coordination-precommit-hook.sh's LOCAL check-1b
+#   AND remote check-1c) call this instead of maintaining their own list —
+#   with ONE deliberate exception: check-1b's orchestrator branch (the hook,
+#   ~line 365) also keeps a second, hand-written copy of this SAME exclusion
+#   list as its degrade path for when this file genuinely isn't sourced.
+#   That fallback is intentional, not an oversight to unify away — for that
+#   specific LOCAL, lower-stakes path, "fail hard whenever coord-address-
+#   filter.sh is momentarily missing" is a worse ceiling than "keep working
+#   off a known-correct duplicate list" (unlike check-1c's REMOTE context,
+#   where a missing helper means UNVERIFIED remote content and failing
+#   closed is the right call — see that check's own else-branch comment).
+#   Round-7 (2026-08-09, Rook): the fallback list MUST be kept in lockstep
+#   with the case statement below by hand — there is no mechanism enforcing
+#   that beyond this comment and the tests that exercise both.
+#
+#   Self-exclusion (a seat's own file, e.g. "$IDENT.md" on the hub) is
+#   INTENTIONALLY NOT part of this predicate — it depends on which identity
+#   is asking, so each caller still applies its own self-check alongside this
+#   shared one.
+coord_is_seat_outbox_basename() {
+  case "$1" in
+    QUEUE.md|PROJECTS.md|queue-*.md|*.archive.md) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
 # Extract TO from a ### header line; prints TO or empty.
 protocol_header_to() {
   local line="$1"

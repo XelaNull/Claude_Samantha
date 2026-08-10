@@ -16,11 +16,19 @@
 # PROVISION mode:
 #   1. Generates a collision-proof provisional identity IN THE SHELL (never by the model):
 #        pending-<uuid>  (fallback: pending-<PID>-<epoch> if uuidgen unavailable).
-#   2. Creates <coord-dir>/pending-<uuid>.md with a minimal presence header and a
+#   2. PROTOCOL 1.4.0 (Message Authenticity): generates a signing key for the
+#      provisional identity via coord-keygen.sh --generate, and embeds its raw
+#      pubkey line in the HEADS-UP body — see § Identity Bootstrap in README.md.
+#      This message is itself never signed (it IS the trust-bootstrap message:
+#      nothing exists yet to verify it against — coord-verify.sh's bootstrap
+#      exemption (a) covers exactly this shape). Key generation failure is
+#      FATAL here, same posture as coord-send.sh: there is no legitimate path
+#      to a newborn that can never sign.
+#   3. Creates <coord-dir>/pending-<uuid>.md with a minimal presence header and a
 #      🛰️ HEADS-UP message to the Orchestrator requesting name assignment.
 #      The new file trips the Orchestrator's watcher (hub watches all .md files).
-#   3. M4: reads the file back to confirm the write persisted.
-#   4. Prints the provisional ID to stdout — one line, for capture via $(...).
+#   4. M4: reads the file back to confirm the write (incl. the pubkey line) persisted.
+#   5. Prints the provisional ID to stdout — one line, for capture via $(...).
 #      All guidance text goes to stderr so the capture is clean.
 #
 # ADOPT mode:
@@ -28,8 +36,19 @@
 #   2. Validates <coord-dir>/<assigned-name>.md does NOT exist (collision guard).
 #   3. Atomically renames <provisional-id>.md → <assigned-name>.md
 #      (POSIX: mv within the same directory is atomic on local filesystems).
-#   4. M4: confirms the rename landed and the provisional file is gone.
-#   5. Prints kill command (M2) and re-arm command to stderr.
+#   4. PROTOCOL 1.4.0: carries the signing key over the SAME rename — moves
+#      the provisional identity's key files to the assigned identity's
+#      coord-keygen.sh-derived path (same key material; the key's own -C
+#      comment field still says the provisional id, which is cosmetic only —
+#      verification keys on the allowed_signers entry, not the comment). This
+#      is what lets the Orchestrator's ASSIGN-IDENTITY reply enroll the
+#      pubkey ONCE, under the assigned name, in the same round trip the
+#      newborn already made (see README.md § Identity Bootstrap step C).
+#      Missing provisional key (pre-1.4.0 bootstrap) is non-fatal — the
+#      assigned identity just auto-provisions a fresh key on its first
+#      coord-send.sh call.
+#   5. M4: confirms the rename(s) landed and the provisional file/keys are gone.
+#   6. Prints kill command (M2) and re-arm command to stderr.
 #
 # M2 NOTE: The provisional watcher records its PID in the provisional file.
 #   The rename preserves that PID entry. Kill by PID before re-arming:
@@ -37,6 +56,14 @@
 #   NEVER pkill -f on a shared machine — it kills peers' watchers too.
 
 set -uo pipefail
+
+BOOTSTRAP_HOME="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)"
+# shellcheck source=coord-keygen.sh
+# Sourcing (not executing) coord-keygen.sh: its CLI dispatch is guarded behind
+# a BASH_SOURCE==$0 check, so this only pulls in key_path_for/resolve_abs_dir —
+# the same key-path derivation --generate/--enroll use, so this script can
+# never drift on where a given identity's signing key lives.
+[[ -f "$BOOTSTRAP_HOME/coord-keygen.sh" ]] && . "$BOOTSTRAP_HOME/coord-keygen.sh"
 
 # ── argument parsing ──────────────────────────────────────────────────────────
 
@@ -91,10 +118,27 @@ do_provision() {
     exit 1
   fi
 
+  # PROTOCOL 1.4.0: generate the provisional identity's signing key and embed
+  # its raw pubkey line in the HEADS-UP body. FATAL on failure — same posture
+  # as coord-send.sh: there is no legitimate path to a newborn that can never
+  # sign. This message itself stays unsigned (coord-verify.sh bootstrap
+  # exemption (a) — nothing exists yet to verify it against).
+  if ! command -v key_path_for >/dev/null 2>&1; then
+    echo "FATAL: coord-keygen.sh not found beside bootstrap-identity.sh ($BOOTSTRAP_HOME) — cannot provision a signing key." >&2
+    exit 1
+  fi
+  local pub_line
+  pub_line=$("$BOOTSTRAP_HOME/coord-keygen.sh" --generate --identity "$prov_id" --dir "$COORD_DIR" 2>/dev/null)
+  if [[ -z "$pub_line" ]]; then
+    echo "FATAL: signing-key generation failed for provisional identity $prov_id — see coord-keygen.sh --generate --identity $prov_id --dir $COORD_DIR for the underlying error." >&2
+    exit 1
+  fi
+
   local ts; ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
   local tmp; tmp=$(mktemp "$prov_file.XXXXXX")
 
-  # Write minimal presence header + HEADS-UP message in one atomic operation.
+  # Write minimal presence header + HEADS-UP message (carrying the pubkey) in
+  # one atomic operation.
   cat > "$tmp" <<EOF
 # Presence: $prov_id
 role: implementer
@@ -114,15 +158,22 @@ Newborn implementer requesting identity assignment.
 
 zone: $ZONE
 state: awaiting-name
+pubkey: $pub_line
 
-Please reply in orchestrator.md with ASSIGN-IDENTITY addressed to $prov_id.
+Please reply in orchestrator.md with ASSIGN-IDENTITY addressed to $prov_id, and enroll
+the pubkey above under the assigned name (PROTOCOL 1.4.0):
+  coord-keygen.sh --enroll --identity <assigned-name> --pubkey-line "$pub_line" --dir <coord-dir>
 EOF
 
   mv "$tmp" "$prov_file"
 
-  # M4: confirm the write persisted.
+  # M4: confirm the write persisted, including the pubkey line.
   if ! grep -q "awaiting-name" "$prov_file" 2>/dev/null; then
     echo "FATAL: provisional file write did not persist: $prov_file" >&2
+    exit 1
+  fi
+  if ! grep -qF "pubkey:" "$prov_file" 2>/dev/null; then
+    echo "FATAL: provisional file write did not persist the pubkey line: $prov_file" >&2
     exit 1
   fi
 
@@ -159,6 +210,17 @@ do_adopt() {
     exit 1
   fi
 
+  # Same validation for PROVISIONAL (item 14, 2026-08-09): it feeds the
+  # exact same `mv`/path-building below as ASSIGNED, and prior to this was
+  # only ever validated indirectly (via key_path_for's identity_charset_check,
+  # item 13 — added AFTER $prov_file is built and used in the mv at line
+  # ~228), which is too late to protect that path-building step itself.
+  if [[ ! "$PROVISIONAL" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+    echo "ERROR: provisional id '$PROVISIONAL' contains unsafe characters." >&2
+    echo "Use only: a-z A-Z 0-9 - _" >&2
+    exit 1
+  fi
+
   local prov_file="$COORD_DIR/$PROVISIONAL.md"
   local final_file="$COORD_DIR/$ASSIGNED.md"
 
@@ -184,6 +246,33 @@ do_adopt() {
   if [[ -f "$prov_file" ]]; then
     echo "FATAL: provisional file still present after rename: $prov_file" >&2
     exit 1
+  fi
+
+  # PROTOCOL 1.4.0: carry the signing key over the same rename — same key
+  # material, new filename — so the pubkey the Orchestrator enrolls under
+  # $ASSIGNED (from the HEADS-UP body) matches what coord-send.sh finds on
+  # disk the next time it runs as $ASSIGNED. Missing provisional key
+  # (pre-1.4.0 bootstrap, or --provision predates this amendment) is
+  # non-fatal — coord-send.sh auto-provisions a fresh key on first use.
+  if command -v key_path_for >/dev/null 2>&1; then
+    local abs_dir prov_key assigned_key
+    abs_dir=$(resolve_abs_dir "$COORD_DIR")
+    prov_key=$(key_path_for "$abs_dir" "$PROVISIONAL")
+    assigned_key=$(key_path_for "$abs_dir" "$ASSIGNED")
+    if [[ -f "$prov_key" ]]; then
+      mv "$prov_key" "$assigned_key"
+      [[ -f "${prov_key}.pub" ]] && mv "${prov_key}.pub" "${assigned_key}.pub"
+      if [[ ! -f "$assigned_key" ]]; then
+        echo "FATAL: signing-key carryover did not persist: $assigned_key" >&2
+        exit 1
+      fi
+      echo "" >&2
+      echo "[bootstrap] Signing key carried over: $prov_key -> $assigned_key" >&2
+      echo "[bootstrap] (same key material — the key's own comment field still says $PROVISIONAL; cosmetic only, does not affect verification.)" >&2
+    else
+      echo "" >&2
+      echo "[bootstrap] NOTE: no provisional signing key found at $prov_key — $ASSIGNED will auto-provision a fresh key on its first coord-send.sh call." >&2
+    fi
   fi
 
   # stderr: guidance for next steps.

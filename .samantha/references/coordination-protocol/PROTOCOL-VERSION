@@ -2,4 +2,4 @@
 # Bump when amending README or any shipped *.sh behavior that seats depend on.
 # Scripts source this file (or embed the same string) so `coord-status` / monitor
 # arm banners can prove they match the docs a human is reading.
-PROTOCOL_VERSION=1.3.0
+PROTOCOL_VERSION=1.4.0

@@ -1,11 +1,38 @@
 # Coordination Protocol — Orchestrator–Implementer
 
-PROTOCOL-VERSION: 1.3.0
+PROTOCOL-VERSION: 1.4.0
 
 > **Versioning:** bump `PROTOCOL-VERSION` (file + this stamp) on every ratified amendment.
 > **Scripts are versioned with the protocol** — `PROTOCOL-VERSION` is sourced by
 > `coord-monitor.sh` / `heartbeat.sh`; arm banners print the stamp. A seat running
 > scripts whose stamp ≠ this README is a defect.
+>
+> **1.4.0** (2026-08-09) — Message Authenticity (SSH signing): origin authentication +
+> tamper-evidence on the mailbox message bus, via `ssh-keygen -Y sign`/`-Y verify`
+> (the same mechanism git uses for SSH-signed commits — no new dependency, **caveat:**
+> `-Y sign`/`-Y verify` need OpenSSH 8.2+, but the deterministic UNKNOWN-SIGNER
+> classification below needs 8.9+ — stock on Ubuntu 20.04 LTS and macOS Monterey is
+> older than that; `coord-verify.sh` self-checks its OpenSSH version and prints a
+> distinct WARN naming the actual cause, rather than degrading silently into every
+> signed message reading as UNKNOWN-SIGNER):
+> - `coord-keygen.sh` (key lifecycle: `--generate`/`--enroll`/`--rotate`/`--fingerprint`)
+>   and `coord-verify.sh` (`--tail`/`--since-line`/`--strict`) — new, Required tier.
+> - `coord-send.sh` now signs every message it posts (auto-provisions a key if none
+>   exists yet) and FAILS LOUD rather than sending unsigned.
+> - `coord-monitor.sh` annotates each emitted message with its verify verdict inline
+>   (informational only).
+> - `coordination-precommit-hook.sh` hard-BLOCKS a commit whose newly-read mail
+>   contains an INVALID (tampered) or non-exempt UNVERIFIED (unsigned) message —
+>   scoped forward-only from the point a seat upgrades; never re-scans pre-amendment
+>   history.
+> - `bootstrap-identity.sh --provision` generates the newborn's key and embeds its
+>   pubkey in the HEADS-UP body; the Orchestrator's `ASSIGN-IDENTITY` reply enrolls it
+>   under the assigned name in the same round trip; `--adopt` carries the key files
+>   over the identity rename.
+> - `allowed_signers` (new, committed, Orchestrator-only single-writer) is the trust
+>   root. `ROSTER-template.md` schema_version 2 (`pubkey_fingerprint`, additive-only).
+> - See § Message Authenticity (SSH signing) below for the full mechanism.
+> - Tests: `tests/run.sh`.
 >
 > **1.3.0** (2026-08-09) — Project-scoped star awareness + skill modes + scheduler + presence sidecar:
 > - **Project wake/watch:** spokes watch `orchestrator.md` + same-project `impl-*.md`;
@@ -48,7 +75,7 @@ Otherwise: **stay in solo mode** (background subagents via `run_in_background`).
 
 | Tier | Scripts | Who |
 |------|---------|-----|
-| **Required (dual)** | `coord-monitor.sh` · `coord-send.sh` · `coord-status.sh` · `heartbeat.sh` · `bootstrap-identity.sh` · `coordination-precommit-hook.sh` | Every dual workspace root |
+| **Required (dual)** | `coord-monitor.sh` · `coord-send.sh` · `coord-status.sh` · `heartbeat.sh` · `bootstrap-identity.sh` · `coordination-precommit-hook.sh` · `coord-keygen.sh` · `coord-verify.sh` (+ `allowed_signers`, Orchestrator-created) | Every dual workspace root — signing is Required, not optional, as of PROTOCOL 1.4.0: `coord-send.sh` always signs |
 | **Optional (PROTOCOL 1.1.0)** | `coord-protocol-metrics.sh` · `coord-session-healthcheck.sh` · `coord-evidence-lint.sh` · `coord-gate-audit.sh` (+ `PROTOCOL-AMENDMENTS.tsv`) | Dual sites adopting the robustness amendment |
 | **Optional (PROTOCOL 1.2.0)** | Remote ssh bus — same `coord-monitor`/`heartbeat` binaries with `--remote-host` + `--remote-bus-dir`; see `advanced/REMOTE-SEATS.md` | Dual sites with off-box Implementers |
 | **Do not copy** | Anything under `retired/` | Tombstones only — **no executables**. History in git. |
@@ -142,6 +169,313 @@ The STAR invariants (single-writer-per-file, hub watches all spokes, spokes watc
 
 ---
 
+## Message Authenticity (SSH signing)
+
+**PROTOCOL 1.4.0.** Every message on the mailbox bus is origin-authenticated and
+tamper-evident: `coord-send.sh` SSH-signs everything it posts, and readers can
+verify (`coord-verify.sh`) or hard-enforce (`coordination-precommit-hook.sh`)
+that a message really came from who it claims and wasn't altered after posting.
+
+### Mechanism
+
+`ssh-keygen -Y sign` / `-Y verify` — OpenSSH's native signing facility, the same
+one git uses for SSH-signed commits. No new dependency: it's already on every
+implementer's box. All signatures use the namespace string `samantha-coord`,
+which scopes them so they can never be replayed as, say, a git-commit signature
+(or vice versa).
+
+**Version floor.** `-Y sign`/`-Y verify` themselves only need OpenSSH 8.2+. The
+UNKNOWN-SIGNER classification below (`ssh-keygen -Y match-principals`) needs
+8.9+ — a box between 8.2 and 8.8 (stock on Ubuntu 20.04 LTS, macOS Monterey)
+has every signed message misclassify as UNKNOWN-SIGNER regardless of real
+enrollment, hard-blocking every `--strict` commit with remedy text that sends
+the operator chasing the wrong problem. `coord-verify.sh` runs a one-time
+version probe (`ssh -V`) and prints a distinct WARN naming the actual cause
+when it detects <8.9, rather than degrading silently.
+
+### Key storage (per-seat private key, never committed)
+
+```
+~/.samantha/coord-keys/<dirhash>/<identity>_ed25519
+```
+
+`<dirhash>` = first 12 hex chars of `sha256(<coord-dir>/.coord-id contents)`.
+`.coord-id` is a stable random token, generated once and committed into the
+coord-dir itself — **not** a hash of the absolute coord-dir path (2026-08-09
+hardening): an absolute-path hash silently orphaned every already-provisioned
+key the moment this portable framework's checkout was moved, renamed, or
+re-cloned to a different location, with no error — just "no key found,
+re-provision" against the new (wrong) derived path. The id file travels WITH
+the coord-dir instead, the same way `allowed_signers` already does. This
+scopes keys per coord-dir, so the same identity string (e.g. two different
+projects both running an `impl-alpha`) never collides across projects on one
+machine.
+
+**`.coord-id` travels WITH a deployment, never between deployments.** It is
+committed **within** that one coord-dir's own git history, same as
+`allowed_signers`. Do **not** carry it over when cloning/copying a coord-dir
+to stand up a genuinely NEW, separate deployment (a second project, a fresh
+environment that should NOT share key namespace with the original) — doing
+so collapses the per-coord-dir separation `.coord-id` exists to provide,
+silently reusing the source deployment's key namespace in the copy. Delete
+`.coord-id` (it regenerates itself on next use) as part of any "clone this
+coord-dir to start a new one" procedure. Conversely, do **not** `.gitignore`
+it in a normal single-deployment repo — it needs to be committed and shared
+exactly like `allowed_signers`, or a fresh checkout regenerates its own
+token and every already-provisioned key in that checkout silently orphans.
+
+Key files are mode `0600` (containing dir `0700`), generated
+passphrase-less (`ssh-keygen -t ed25519 -N ""`) — proportionate for a local
+automation key protected by filesystem permissions, the **same trust tier as an
+unattended CI deploy key**. Stated plainly rather than hidden: a passphrase-less
+key is only as safe as the box it lives on.
+
+`coord-keygen.sh` owns this lifecycle:
+
+| Mode | What it does |
+|------|--------------|
+| `--generate --identity <id> --dir <coord-dir>` | Idempotent. Prints the identity's raw pubkey line (existing or newly generated) to stdout; guidance to stderr. |
+| `--enroll --identity <id> --pubkey-line "<line>" --dir <coord-dir> [--rotate]` | Appends `<id>`'s key to `allowed_signers`. Refuses a silent key-swap (different key already on file) unless `--rotate` is also given. |
+| `--rotate --identity <id> --pubkey-line "<line>" --dir <coord-dir>` | Same as `--enroll --rotate` — an explicit, rare, deliberate re-key. |
+| `--fingerprint --identity <id> --dir <coord-dir>` | Prints `ssh-keygen -lf` output, for display in ACK/roster messages (see ROSTER-template.md's `pubkey_fingerprint` field). |
+
+### Trust root: `allowed_signers`
+
+`<coord-dir>/allowed_signers` — standard OpenSSH `allowed_signers` format, one
+line per identity:
+
+```
+<identity> namespaces="samantha-coord" <key-type> <base64-key>
+```
+
+**Single-writer: Orchestrator only** — same pattern as `QUEUE.md` (M7; see §
+Topology — STAR). This file **IS committed/shared**: it holds public keys only,
+which is Rule-5-safe (a public key is not a secret).
+
+**TOFU trust root.** The very first key enrolled — the Orchestrator's own, at
+its own bootstrap — is trust-on-first-use: nothing yet exists to vouch for it.
+This is the **same trust tier the Orchestrator already holds** as sole namer in
+§ Identity Bootstrap (collision-free by construction) — not a new, separately-
+justified trust primitive.
+
+**Write-gated, unconditionally (2026-08-09, human-approved; verb coverage
+widened 2026-08-09 round-3 — see below).**
+`coordination-precommit-hook.sh` BLOCKS any commit-landing verb (`commit`,
+`merge`, `cherry-pick`, `rebase`, `am`, `revert`, `pull`) or `git push` that
+touches a file named `allowed_signers` unless an explicit authorization
+reference (`AUTH:`/`human GO`/`DECISION-…`/`sign-off:`, or `COORD_AUTH_REF`)
+is present — the same marker pattern § "Fail closed at the point of action"
+already uses for gated pushes below, but **unconditional** here (not behind
+`COORD_GATED_PATH_PATTERN`): this file is the trust root for every signature
+verification in the protocol, so an unreviewed edit here is categorically
+different from an unreviewed edit to an ordinary file.
+
+**Ceiling, stated so it isn't over-trusted:** none of this — the write gate,
+the single-writer-Orchestrator convention, the TOFU bootstrap above — stops a
+determined malicious process that already has write access to the coord-dir.
+Filesystem permissions were never an isolation boundary in this protocol (see
+§ "Fail closed at the point of action" below for the same admission about its
+gated-push mechanism); a co-resident process with that access can edit `allowed_signers`
+directly, bypassing every hook, or forge an authorization reference exactly as
+easily as a legitimate author writes one. What this buys is real but partial:
+an ACCIDENTAL or careless edit (a bad rotate, a copy-paste merging two
+coord-dirs' trust roots) gets caught before it lands, and a deliberate change
+leaves an auditable trail. Full enforcement against a hostile co-resident
+needs OS-level process isolation (separate users/containers/sandboxes) —
+out of scope for a filesystem-permissions-based protocol.
+
+### Enrollment handshake (bootstrap)
+
+Naming and key-trust land in **one round trip**, not two ceremonies:
+
+1. A newborn Implementer's `bootstrap-identity.sh --provision` generates its
+   signing key and embeds the raw pubkey line in the `🛰️ HEADS-UP` body it
+   already posts (this message itself stays unsigned — see Exemptions below).
+2. The Orchestrator's `🤝 ASSIGN-IDENTITY` reply step calls
+   `coord-keygen.sh --enroll` with that pubkey line, under the **assigned**
+   name (not the provisional one).
+3. `bootstrap-identity.sh --adopt` carries the local key files over the same
+   rename that retargets the mailbox file (`pending-<uuid>_ed25519` →
+   `impl-alpha_ed25519`) — same key material, so what the Orchestrator just
+   enrolled is exactly what `coord-send.sh` finds on disk from then on.
+
+A **pre-assigned** identity (no bootstrap handshake) enrolls the same way, just
+without the provisional-name detour — see the Implementer checklist below.
+
+### Sending: always signed, hard-fail on sign failure
+
+`coord-send.sh` auto-provisions a key (`coord-keygen.sh --generate`) if none
+exists yet for `--identity`, then signs every message it posts. If
+`ssh-keygen -Y sign` fails for any reason (including too old an `ssh-keygen`),
+`coord-send.sh` **FAILS LOUD and refuses to send unsigned** — it never silently
+degrades. There is no supported way to post an unsigned message once a seat's
+tooling is at 1.4.0.
+
+### heartbeat.sh's own appends: signed the same way, except the alerts that must never go silent
+
+`heartbeat.sh` never routes through `coord-send.sh` (it appends directly to its
+own mailbox file on a timer), but it shares `coord-keygen.sh`'s signing
+helpers (`ensure_signing_key` / `sign_message_file` — the exact functions
+`coord-send.sh` itself calls), so it can never drift from `coord-send.sh` on
+signing mechanics:
+
+- **HEARTBEAT / IDLE-KICK** and **HOLD-CHECK** entries: sign or don't post.
+  If signing fails for either, `heartbeat.sh` WARNs to stderr and skips that
+  cycle's append entirely — it never falls back to an unsigned post. This is
+  safe because the dead-man switch (`WATCHER_DEAD_TICKS`) already tolerates a
+  missed tick, so there is no unsigned shape of a routine heartbeat/HOLD-CHECK
+  for `--strict` to ever need to exempt.
+- **⚠️ WATCHER-DOWN** and **⚠️ HOLD-WAKE-UNACKED** (the two dead-man alarms —
+  both self-terminate the heartbeat, exit 42 and exit 43 respectively, to
+  force a human or peer to notice): try to sign first, same as everything
+  else — when signing succeeds the message is fully verified like any other,
+  tamper included. Signing these is best-effort, not mandatory: they are the
+  messages in the protocol that must never be silently swallowed for
+  auth-layer reasons (a dead-man alarm is exactly the moment you can least
+  afford a "couldn't verify, so drop it" gap), so **only if signing itself
+  fails** does `heartbeat.sh` fall back to appending it UNSIGNED — loudly,
+  with the body prefixed
+  `[SIGNING-FAILED — unauthenticated, verify liveness by other means]`. Both
+  get identical treatment deliberately (2026-08-09 ratified): exempting one
+  dead-man alarm from fail-closed auth but not the other would be an
+  inconsistent trust model with no defensible reason. See exemption (c) below
+  for how `coord-verify.sh` tolerates exactly this narrow fallback shape
+  without weakening verification of a signed alert.
+
+### Signature block format
+
+Appended by `coord-send.sh` immediately after the message body. See
+MAILBOX-template.md § Message Grammar for the full grammar and a worked
+example. The `bytes:` line is the exact byte length of the signed region —
+`coord-verify.sh` reads exactly that many bytes starting at the message's
+header line to find where the signature applies, full stop, which is what
+makes message-boundary detection exact rather than a heuristic (2026-08-09
+hardening — see coord-verify.sh's header comment for why the old
+"scan forward for the next header-shaped line" approach could misparse a
+message whose body legitimately quotes a prior header).
+
+### Verifying: `coord-verify.sh`
+
+```bash
+coord-verify.sh --dir <coord-dir> --file <mailbox-file> [--tail N] [--since-line N] [--strict]
+```
+
+Per message: `✅ VERIFIED` / `⚠️ UNVERIFIED (no signature)` / `❓ UNKNOWN-SIGNER
+(identity not enrolled / allowed_signers stale)` / `❌ INVALID (signature
+present, verification FAILED)`. `❌ INVALID` is always fatal (exit non-zero) —
+a tamper/forgery signal, `--strict` or not. `⚠️ UNVERIFIED` alone exits 0
+unless `--strict` is given, in which case it (and `❓ UNKNOWN-SIGNER`, always)
+also fails, **except** for three exempt message shapes for `⚠️ UNVERIFIED`
+(detected by FROM/TAG/TO pattern on the header line — plus, where noted, a
+FROM == basename(file) file-binding check — see the script's own header
+comment, which is written to be the one place a reviewer can audit "did they
+just carve a hole in the gate"):
+
+1. a `pending-*` seat's first `🛰️ HEADS-UP`, file-bound to its own
+   `pending-<uuid>.md` (bootstrap handshake),
+2. an `orchestrator` `🤝 ASSIGN-IDENTITY` reply addressed to a still-`pending-*`
+   TO (bootstrap handshake), and
+3. an unsigned message whose body carries the literal sentinel
+   `[SIGNING-FAILED —`, file-bound to its own poster's outbox
+   (heartbeat.sh's best-effort-sign-else-flag fallback for either dead-man
+   alarm, `⚠️ WATCHER-DOWN` or `⚠️ HOLD-WAKE-UNACKED` — collapsed into one
+   sentinel-keyed exemption (2026-08-09) rather than two separately tag-
+   enumerated ones, so it self-extends to any future alarm type heartbeat.sh
+   grows without a new enumerated hole).
+
+`❓ UNKNOWN-SIGNER` is never exempt for any of the three shapes above — those
+exemptions apply only to a message with **no SIG block at all**; a message
+that DOES carry one is always fully verified (enrolled-but-invalid still
+comes back `❌ INVALID`, not-yet-enrolled comes back `❓ UNKNOWN-SIGNER`, both
+non-exempt under `--strict`). The first two exemptions exist only to let the
+trust-bootstrap handshake happen without a chicken-and-egg deadlock. The third
+exists only because an alert whose signing itself failed must still get
+through — one that DOES carry a SIG block gets no special treatment at all: it
+is fully verified, file-bound, and a tampered/forged one still comes back
+`❌ INVALID`, never exempt.
+
+`coord-monitor.sh` annotates every emitted message inline with its `--tail`
+verdict — informational only, never affects wake/addressing mechanics.
+
+### Hard-block: `coordination-precommit-hook.sh`
+
+Runs alongside (not instead of) the existing Rule-4 mailbox-read gate, but is
+**deliberately independent of it** (2026-08-09 round-2 hardening — see
+below for why). The hook derives a trusted lower bound for "what's new"
+from **`git show HEAD:<file>`** — the mailbox file's content as of the last
+commit (nothing, if the file is untracked or new) — snaps that byte count to
+the nearest real message boundary via `coord-verify.sh --find-boundary`, and
+runs `coord-verify.sh --strict` from there to the current working-tree EOF.
+Any `❌ INVALID`, or any non-exempt `⚠️ UNVERIFIED`, **BLOCKS the commit**
+(not a warning) — printing the offending message's header and verdict so
+the cause is visible immediately.
+
+**Why git, not the mailbox-read receipt:** an earlier version of this gate
+anchored on the same per-seat receipt the Rule-4 nudge uses
+(`<coord-dir>/.watch-state/<id>/<file>.size`). A live security review showed
+that receipt is not a security boundary even with its own hash-binding —
+sha256 is not a keyed MAC, so anything with write access to inject unsigned
+or tampered mail also has read access to compute a matching hash and
+self-write a forged receipt using the exact helper an honest watcher uses.
+The receipt still exists and is still hash-bound (see coord-receipt.sh), but
+it is used **only** for the original Rule-4 "have you read your mail" nudge,
+which pre-dates this amendment and never claimed to be a security boundary.
+Git history is not attacker-forgeable without rewriting it, which this
+protocol already treats as a gated, irreversible action elsewhere (Disaster
+Rule 1, the force-push carveout).
+
+**Verb coverage (widened 2026-08-09 round-3 — Cipher CRITICAL):** the hook
+self-filters on the Bash command TEXT, and used to recognize only a literal
+`git commit` / `git push` substring. `git merge`, `git cherry-pick`, `git
+rebase --continue`, and `git am` all land a commit object exactly as surely
+as `git commit` does, and all bypassed every check here — including this
+hard-block and the `allowed_signers` write gate below — with zero output,
+no `--no-verify` or history rewrite needed. The self-filter now also
+recognizes `merge`, `cherry-pick`, `rebase`, `am`, `revert`, and `pull`
+(which implicitly merges or rebases). **Ceiling, stated so it isn't
+over-trusted:** this remains a Claude-Code-session-scoped Bash-command-TEXT
+matcher, not equivalent to a real git hook — it does not protect a human
+typing git commands directly in a terminal (it only fires on a Bash tool
+call inside a hooked session), and a text matcher can always be blindsided
+by some future/uncommon verb, alias, or wrapper script this list doesn't
+enumerate. A durable fix — real `.git/hooks/pre-commit` +
+`pre-merge-commit` hooks, enforced by git itself regardless of tool or
+process — is out of scope for 1.4.0; flagged as a future item, the same
+"acknowledged gap, not solved this round" treatment `advanced/REMOTE-SEATS.md`
+gets for cross-machine watch coverage.
+
+**Scope, stated as a PREREQUISITE, not just a note (sharpened 2026-08-09
+round-3 — Rook):** if a coord-dir's mailbox files are committed to git as
+part of normal operation, only mail appended since the last commit is
+re-verified — a live deployment adopting this amendment does not find
+itself instantly re-blocked on its own pre-amendment (unsigned) history
+every run, only on what's actually new. If a mailbox file has never been
+committed at all, the git-anchored floor is 0 and the **whole file** is
+verified every time — the safe default in both directions, but with one
+real consequence for `--strict`: a newly-`--adopt`ed identity's OWN first
+HEADS-UP message permanently carries `FROM=pending-<uuid>` inside
+`<assigned-name>.md` (the `--adopt` rename never rewrites message content —
+see § Identity Bootstrap), which is legitimate and correctly non-exempt-but-
+not-INVALID under the two-tier structural check, but reads as a hard
+`⚠️ UNVERIFIED` block under `--strict` for as long as it's never git-anchored
+past. Since the Orchestrator's inbox is every peer file, an un-committed
+coord-dir means every Orchestrator commit is blocked forever by this one
+fully-honest message. **Commit the coord-dir's mailbox files once after each
+identity `--adopt`, before relying on `--strict`** — see the Bootstrap
+Checklist below. See
+`.samantha/references/safety-carveouts.md`: never bypass or disable this
+hard-block without explicit human sign-off — a verification failure is a
+tamper/impersonation signal, not friction to route around.
+
+### Rotation
+
+Re-keying an identity (compromised key, lost key, routine hygiene) is
+`coord-keygen.sh --rotate` — the Orchestrator only, deliberate, loud on stderr.
+It replaces what every reader currently trusts for that identity, so confirm
+out-of-band that the rotation is genuine before running it.
+
+---
+
 ## Bootstrap Checklist
 
 Run these steps in order when standing up a new dual session.
@@ -151,6 +485,11 @@ Run these steps in order when standing up a new dual session.
 ```
 [ ] 1. Identify role: cwd = workspace root → ORCHESTRATOR.
 [ ] 2. Create <coord-dir>/ if absent.
+[ ] 2b. PROTOCOL 1.4.0 — generate + self-enroll the signing key (the TOFU trust
+         root; same trust tier as the Orchestrator already being "sole namer,
+         collision-free by construction" — see § Message Authenticity below):
+           LINE=$(./coord-keygen.sh --generate --identity orchestrator --dir <coord-dir>)
+           ./coord-keygen.sh --enroll --identity orchestrator --pubkey-line "$LINE" --dir <coord-dir>
 [ ] 3. Write orchestrator.md from ROSTER-template (role=Orchestrator, state=Active).
 [ ] 4. M4: read it back — confirm it landed (sandbox filesystem can silently swallow writes).
 [ ] 5. Arm coord-monitor.sh via your harness's output→chat bridge
@@ -170,7 +509,9 @@ Run these steps in order when standing up a new dual session.
 ### Implementer
 
 > **No pre-assigned identity?** Use the Identity Bootstrap protocol (§ Identity Bootstrap
-> below) to request a name from the Orchestrator before running this checklist.
+> below) to request a name from the Orchestrator before running this checklist —
+> `bootstrap-identity.sh --provision` now also generates your signing key and
+> embeds it in the HEADS-UP for the Orchestrator to enroll (PROTOCOL 1.4.0).
 
 ```
 [ ] 1. Identify role: cwd = sub-repo or worktree → IMPLEMENTER.
@@ -178,6 +519,14 @@ Run these steps in order when standing up a new dual session.
          (If no identity pre-known, the Identity Bootstrap section provides the naming handshake.)
 [ ] 3. Write <coord-dir>/impl-<name>.md from ROSTER-template (role=Implementer, zone=<cwd>, state=Active).
 [ ] 4. M4: read it back — confirm it landed.
+[ ] 4b. PROTOCOL 1.4.0 — if this identity was pre-assigned (skipped the Identity
+         Bootstrap handshake, so nobody has generated/enrolled a key for it yet),
+         generate + hand the pubkey to the Orchestrator to enroll:
+           LINE=$(./coord-keygen.sh --generate --identity impl-<name> --dir <coord-dir>)
+           # send $LINE to the Orchestrator (HEADS-UP), who runs:
+           #   ./coord-keygen.sh --enroll --identity impl-<name> --pubkey-line "$LINE" --dir <coord-dir>
+         (If this identity WAS bootstrapped via --provision/--adopt, this already
+         happened as part of that handshake — skip.)
 [ ] 5. Arm coord-monitor.sh via your harness's output→chat bridge
          (see § Arming the inbox above):
          ./coord-monitor.sh --identity impl-<name> --dir <coord-dir>
@@ -260,6 +609,10 @@ collision-free by construction.
    ```
    Creates `<coord-dir>/pending-<uuid>.md` with a `🛰️ HEADS-UP → orchestrator`
    requesting name assignment. The new file trips the Orchestrator's watcher.
+   PROTOCOL 1.4.0: also generates a signing key for the provisional identity and
+   embeds its raw pubkey line in the HEADS-UP body (`pubkey: …`) — this message
+   itself stays unsigned (coord-verify.sh's bootstrap exemption covers exactly
+   this shape; nothing exists yet to verify it against).
 
 2. **Arm** the monitor under the provisional identity, via your harness's output→chat
    bridge (see § Arming the inbox above):
@@ -279,6 +632,8 @@ collision-free by construction.
    ```
    Atomically renames `pending-<uuid>.md → impl-alpha.md` (POSIX `mv`, same dir).
    Prints the provisional-monitor kill command and the re-arm command.
+   PROTOCOL 1.4.0: also carries the signing key files over the same rename
+   (same key material — the enrolled pubkey from step C already matches).
 
 5. **Kill** the provisional monitor (M2 — by PID, never `pkill -f`) and **re-arm**
    under the adopted identity:
@@ -294,14 +649,39 @@ collision-free by construction.
 A. Read `pending-<uuid>.md` — the HEADS-UP names the requester and its zone.
 B. Pick a friendly unique name (`impl-alpha`, `impl-beta`, …). Unique = no existing
    `<name>.md` file in `<coord-dir>/` at the time of assignment.
-C. Reply in `orchestrator.md` with `🤝 ASSIGN-IDENTITY` addressed to `pending-<uuid>`:
+C. PROTOCOL 1.4.0: enroll the pubkey from the HEADS-UP body under the **assigned**
+   name (not the provisional one) — naming and key-trust land in one round trip:
+   ```bash
+   ./coord-keygen.sh --enroll --identity impl-alpha --pubkey-line "<pubkey: line from the HEADS-UP>" --dir <coord-dir>
+   ```
+D. Reply in `orchestrator.md` with `🤝 ASSIGN-IDENTITY` addressed to `pending-<uuid>`:
    ```
    ### <UTC> — orchestrator → pending-<uuid> — 🤝 ASSIGN-IDENTITY
 
    You are: impl-alpha
    Unique in <coord-dir>/ at time of assignment.
+   Pubkey enrolled under impl-alpha (PROTOCOL 1.4.0).
    Adopt: bootstrap-identity.sh --adopt. Re-arm watcher. Reply with ACK.
    ```
+   This reply itself may read UNVERIFIED under `coord-verify.sh --strict` — it is
+   the second bootstrap-exempt shape (FROM orchestrator, TAG ASSIGN-IDENTITY);
+   see coord-verify.sh's header comment for exactly why.
+
+E. **PREREQUISITE for `--strict` (2026-08-09 round-3 — Rook), do this once per
+   adopt, not optional:** commit the coord-dir's mailbox files, including the
+   just-adopted `<name>.md`. The `--adopt` rename in step 4 never rewrites
+   message content, so `<name>.md` permanently carries the newborn's own
+   `🛰️ HEADS-UP` with `FROM=pending-<uuid>` inside a file now named
+   `<name>.md` — legitimate (correctly non-exempt-but-not-INVALID under the
+   two-tier structural check in § Message Authenticity), but a hard
+   `⚠️ UNVERIFIED` block under `--strict` for as long as it's never
+   git-anchored past. The Orchestrator's inbox is every peer file, so an
+   un-committed coord-dir means this one fully-honest message blocks every
+   future Orchestrator commit, forever, with remedy text that reads like a
+   tamper signal. If this coord-dir is never committed as a matter of normal
+   operation, `--strict` verifies the newborn's whole file every run instead
+   (the safe default — see § Hard-block's Scope paragraph) and this step is
+   moot; if it IS committed, this step is what actually clears the block.
 
 ### Optional: restart stability
 
@@ -467,8 +847,8 @@ Lossless-mandate WOs inherit this proving standard automatically (see WORK-ORDER
 | `IDLE-SCHEDULE-template.md` | Per-seat idle activity schedule for `heartbeat --schedule-file` |
 | `SOLO.md` | Solo protocol stub |
 | `advanced/MULTI-ORCHESTRATOR.md` | Design memo only — multi-hub options |
-| `coord-monitor.sh` | Persistent STAR monitor — project watch/filter (1.3.0); presence sidecar PID write; PROTOCOL stamp on arm |
-| `coord-send.sh` | The publish half of the coordination chat-room — auto-fills timestamp/identity/header, appends atomically to your own outbox, reads the append back to verify it landed; named args `--to`/`--tag`/`--subject`/`--body`/`--body-file` |
+| `coord-monitor.sh` | Persistent STAR monitor — project watch/filter (1.3.0); presence sidecar PID write; PROTOCOL stamp on arm. Remote channel (`--remote-host`): ssh-fetch-verify-annotate on arrival + auto-writes `<coord-dir>/.remote-channels` on arm — see `advanced/REMOTE-SEATS.md` § Message Authenticity |
+| `coord-send.sh` | The publish half of the coordination chat-room — auto-fills timestamp/identity/header, appends atomically to your own outbox, reads the append back to verify it landed; named args `--to`/`--tag`/`--subject`/`--body`/`--body-file`. `--remote-seat`/`COORD_REMOTE_SEAT=1` (MANDATORY-EXPLICIT): skips the local enrollment readback-verify for a bus dir with no local `allowed_signers` by design — see `advanced/REMOTE-SEATS.md` § Message Authenticity |
 | `coord-status.sh` | Read-only liveness — local (+ remote) watcher pidfiles and heartbeat; ALL-CHANNELS aware; portable coord-dir default |
 | `heartbeat.sh` | IDLE-KICK (`--idle-policy`) + Orchestrator discover-on-idle (folded into IDLE-KICK body) + HOLD-DAMP-V2 + `--weak-seat` + ALL-CHANNELS watcher dead-man (`exit 42`); portable `--dir` |
 | `coord-protocol-metrics.sh` | Shared helpers sourced by `coord-status.sh` / `heartbeat.sh` — queue depth per queue file, `PROTOCOL-VERSION` stamp, ratified-but-unimplemented amendment count, migration-chain state. Standalone-runnable for a one-shot dump |
@@ -481,9 +861,13 @@ Lossless-mandate WOs inherit this proving standard automatically (see WORK-ORDER
 | `WORK-ORDER-template.md` | WO format (full + one-liner tiers) and STATUS reply |
 | `ROSTER-template.md` | Presence file schema (M9 richer fields); registration and deregistration |
 | `QUEUE-template.md` | Claimable queue, three-bucket SSOT, depth-floor, push-assignment rules; in multi-project deployments, instantiate one queue per downstream repo (`queue-<repo>.md`) — see § Multi-project coordination |
-| `coordination-precommit-hook.sh` | PreToolUse hook for `git commit`/`push`/`rebase`: mailbox-read gate (Rule 4), dangerous-verb warning (`add -A`/`add .`/`commit -a`), non-blocking secret-scan; supports both the Claude Code JSON-stdin tool-input protocol and the Cursor `beforeShellExecution` allow/deny contract |
+| `coordination-precommit-hook.sh` | PreToolUse hook for git commit-landing verbs (`commit`/`merge`/`cherry-pick`/`rebase`/`am`/`revert`/`pull`) and `push`: mailbox-read gate (Rule 4), dangerous-verb warning (`add -A`/`add .`/`commit -a`), non-blocking secret-scan, git-anchored sig-verify (`COORD_REMOTE_SEAT_HOOK=1` explicit escape for a remote seat running this hook against its own bus-dir-as-coord-dir), `allowed_signers` write gate, remote-channel sig-verify (reads `.remote-channels`; every remote value goes through `coord-remote-verify.sh`'s `coord_remote_shquote` before being spliced into an ssh command — round-5, 2026-08-09, closed a live-demonstrated RCE; always prints which channel(s) it checked, even zero, and fails closed on an unreachable host or a live remote watcher with no configured channel — see `advanced/REMOTE-SEATS.md` § Round-5 hardening); supports both the Claude Code JSON-stdin tool-input protocol and the Cursor `beforeShellExecution` allow/deny contract. Bash-command-text matcher, not a real git hook — see § Hard-block for the stated ceiling |
 | `retired/` | Tombstones only — retired watcher/hook **scripts were deleted** (git history retains bodies). See `retired/README.md`. Do not resurrect. |
-| `bootstrap-identity.sh` | DESIGN EXTENSION: provisional-ID generation (`--provision`) and identity adoption (`--adopt`) for the naming handshake; see § Identity Bootstrap |
+| `bootstrap-identity.sh` | DESIGN EXTENSION: provisional-ID generation (`--provision`) and identity adoption (`--adopt`) for the naming handshake; see § Identity Bootstrap. PROTOCOL 1.4.0: also generates/embeds and carries over the signing key. |
+| `coord-keygen.sh` | PROTOCOL 1.4.0: SSH signing-key lifecycle — `--generate`/`--enroll`/`--rotate`/`--fingerprint`. Sourceable (key-path helpers only) by `coord-send.sh` / `bootstrap-identity.sh`. See § Message Authenticity (SSH signing) |
+| `coord-verify.sh` | PROTOCOL 1.4.0: verifies mailbox message signatures against `allowed_signers` — `--tail`/`--since-line`/`--strict`/`--find-boundary`; the three exemptions are documented in its own header comment |
+| `coord-remote-verify.sh` | PROTOCOL 1.4.0 remote-seat extension: shared `verify_remote_buffer` helper — writes an ssh-fetched buffer to a correctly-named local temp file and runs `coord-verify.sh` against it with `--dir` pointed at the hub's own local `allowed_signers`. Also carries `coord_remote_shquote` (round-5, 2026-08-09): POSIX single-quote escaping for any value spliced into a remote ssh command string — a HARD dependency for `coord-monitor.sh --remote-host` (refuses to arm without it) after a live-demonstrated command-injection finding via an unescaped remote filename. Sourced by both `coord-monitor.sh`'s remote channel and `coordination-precommit-hook.sh`. See `advanced/REMOTE-SEATS.md` § Message Authenticity |
+| `allowed_signers` | PROTOCOL 1.4.0: the trust root — OpenSSH allowed_signers format, one line per identity's public key. Orchestrator-only single-writer (same pattern as `QUEUE.md`, M7). Committed/shared — public keys only, Rule-5-safe |
 | `advanced/sqlite-mcp.README.md` | Optional advanced path: SQLite(WAL) + stdio-MCP for atomic claim (M6) — design sketch; align to persistent `coord-monitor.sh`, not the retired one-shot watcher |
 | `advanced/REMOTE-SEATS.md` | Optional remote ssh bus: second hub monitor, `watcher-remote.pid`, weak-seat idle policy; `--remote-host` requires `--remote-bus-dir` (no baked paths) |
 | `advanced/COMPONENT-OWNERSHIP.md` | DESIGN EXTENSION, not yet framework-ratified: per-seat component assignment on multi-seat repos, mandatory claim-marker to prevent duplicate-claim races, idleness-AND-gated escalation teeth. Verify against your own deployment before trusting the accountability mechanics as-is — see the file's own Status note. |
