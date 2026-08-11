@@ -17,8 +17,8 @@
         "hooks": [
           {
             "type": "agent",
-            "if": "Bash(git commit *)",
-            "prompt": "Review the staged changes by running git diff --staged. Check for: debug code, missing error handling, unintended files, print/console.log statements. Return {\"ok\": true} if clean, or {\"ok\": false, \"reason\": \"specific issues\"} if problems found.",
+            "if": "Bash(git commit:*)",
+            "prompt": "You are gating a Bash tool call. First check the ACTUAL command you were invoked for (given in your tool input) — if it is not a `git commit` invocation, immediately return {\"ok\": true} without running anything else; do not treat an unrelated command as a failure to review. Only if the command genuinely is `git commit ...`: review the staged changes by running git diff --staged. Check for: debug code, missing error handling, unintended files, print/console.log statements. Return {\"ok\": true} if clean, or {\"ok\": false, \"reason\": \"specific issues\"} if problems found. If there is nothing staged, also return {\"ok\": true} (nothing to block on) rather than treating that as an error.",
             "model": "sonnet",
             "timeout": 60
           }

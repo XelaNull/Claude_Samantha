@@ -362,6 +362,135 @@ ceiling for 1.5.0, not an oversight.
 
 ---
 
+## Local Sibling Seats — same machine, non-nested repo (not the remote channel)
+
+**This is NOT the ssh remote-bus mechanism documented above.** No
+`--remote-host`, no `--remote-bus-dir`, no second `coord-monitor.sh` process,
+no `--remote-seat` flag on `coord-send.sh`, no `.remote-channels`. None of §
+Message Authenticity's remote-channel coverage or § Protocol Version
+Handshake's remote-ceiling caveats apply here — this pattern is fully covered
+by the ordinary LOCAL-channel signing/verification/version-handshake behavior
+documented in the main `README.md`.
+
+**What it actually is:** the ordinary **local** channel, used by a seat whose
+own repo is **not** filesystem-nested inside its Orchestrator's directory
+tree. Every same-machine Implementer documented elsewhere in this framework
+so far happens to be nested — a subdirectory of its Orchestrator's own
+workspace root. Nothing in the protocol actually requires that nesting. A
+sibling repo (e.g. `/path/to/sibling-repo` coordinating with an Orchestrator
+rooted at `/path/to/orchestrator-workspace`, same machine, same filesystem,
+no common parent directory) uses the identical mechanism — real,
+deployment-specific paths for an actual pair belong in that deployment's own
+`CLAUDE.md`/`DEPLOYMENTS.md` (cutover item 9's rule), never in this portable
+pack:
+
+- Point `--dir`/`COORD_DIR` at the Orchestrator's coord-dir by **absolute
+  path** — `COORD_DIR` and `--dir` are always an arbitrary filesystem path in
+  every Required-tier script; nothing anywhere derives or validates a
+  coord-dir's location relative to the invoking script's own position.
+- Invoke the Orchestrator's own script copies (`coord-monitor.sh`,
+  `heartbeat.sh`, `coord-send.sh`, `bootstrap-identity.sh`,
+  `coordination-precommit-hook.sh`, etc.) by **absolute path** — the exact
+  same "Implementer sub-repos invoke the parent workspace copies by absolute
+  path" convention the § Script tiers table (main `README.md`) already
+  states for nested Implementers. A sibling seat needing its own full script
+  suite is no more true than it is for a nested one — see § Script tiers.
+
+**Script audit (verified by direct code inspection, this round):**
+`coord-send.sh`, `coord-monitor.sh`, `coord-status.sh`, `heartbeat.sh`,
+`bootstrap-identity.sh`, and `coordination-precommit-hook.sh` were read in
+full looking for any hardcoded relative-path assumption — `$(dirname "$0")`-
+style logic assuming `COORD_DIR` is a sibling of the invoking script, or any
+git operation assuming the coord-dir sits inside the invoking seat's own
+repo. Finding: every script's `$(dirname "$0")`/`${BASH_SOURCE[0]}` derivation
+is used ONLY to locate that script's OWN sibling script copies beside
+itself (e.g. `coordination-precommit-hook.sh` sourcing `coord-verify.sh`
+"beside this hook") — never to derive, default, or validate where `COORD_DIR`
+lives. `COORD_DIR`/`--dir` defaults to `${COORD_DIR:-$PWD/.samantha/coord}`
+and is otherwise fully caller-supplied, with zero coupling to the script's
+own location. The hook's one git-anchoring step (`cd
+"$(dirname "$ORCH_FILE")" && git show HEAD:./$(basename "$ORCH_FILE")`)
+operates on the **mailbox file's own directory** — i.e. the coord-dir itself
+— never relative to the invoking script's location, so it behaves
+identically whether that coord-dir sits inside, alongside, or entirely
+outside the calling seat's own repo. **Conclusion: this pattern requires
+zero script changes** — it was already supported, just never named or
+exercised for a non-nested pair before now. No `PROTOCOL-VERSION` bump.
+
+**Ceiling — git-anchored verification floor (applies to the LOCAL channel
+too, not just remote bus dirs).** The hook's git-anchoring step above keys
+on the **coord-dir's own git tree**, never the invoking seat's — so if the
+coord-dir itself isn't git-tracked at all (an Orchestrator workspace root
+need not be a git repo, and at least one live deployment's isn't), the
+anchor is permanently 0 and `--strict` re-verifies the **entire** mailbox
+file on every single commit,
+forever, not just what's new since the last commit. This is the same
+ceiling § Message Authenticity's hard-block already documents and cutover
+items 10-11 already handle for remote bus dirs (no git-anchor equivalent
+exists for a file on a different host) — it just wasn't previously stated
+as applying to an un-git-tracked LOCAL coord-dir as well, which a sibling
+seat makes no more or less likely than a nested one.
+
+**Ceiling — protocol-version handshake authority.** A sibling seat invoking
+the hub's own `heartbeat.sh` (by absolute path, as this pattern requires)
+stamps the **hub's** `PROTOCOL_VERSION` into that HEARTBEAT body, not the
+version of the sibling repo's own separately-pulled
+`.samantha/references/coordination-protocol/` copy — so § Protocol Version
+Handshake Part D's MAJOR-mismatch gate can never actually detect a sibling
+(or nested) seat's own reference-pack copy having drifted from the hub's;
+it only ever sees the version of whichever script binary actually executed.
+Since each repo's own copy of this pack can be synced on its own schedule,
+state plainly: **the copy that executes governs behavior** — for any script
+invoked by absolute path against a shared hub, that is always the hub's own
+copy, regardless of what a reader's local `CLAUDE.md` or reference-pack
+`PROTOCOL-VERSION` file happens to say. "Docs win" (this framework's own
+canon-vs-code rule) applies to which copy's *behavior* is authoritative,
+not to which document a reader opens first.
+
+**Simpler than the nested case, not harder — but a trade, not a pure win.**
+The nested topology (a repo physically inside its Orchestrator's tree) needs
+an explicit "ancestor-context override" carve-out in the nested repo's own
+`CLAUDE.md` — see this framework's own `DEPLOYMENTS.md` § Hard-won lessons:
+`CLAUDE.md` cascades from ancestor directories, so a standalone or
+differently-rooted install nested inside a coordination workspace can
+otherwise inherit the parent's live orchestrator context and misidentify
+itself. A **sibling** repo has no ancestor/descendant filesystem
+relationship with its Orchestrator at all — `CLAUDE.md` never cascades
+between sibling directories — so there is nothing to override; one less
+thing to get right. The other side of that same coin: no cascade also means
+no automatic path for a hub-side change (the coord-dir moving, a script
+relocating, a protocol bump) to reach the sibling the way it would
+automatically show up in a nested repo's inherited context — a sibling seat
+only learns of such a change through the mechanisms this pack already has
+for that (the version-handshake advisory alert, a human, or a deliberate
+resync), never for free from the filesystem.
+
+**Roster visibility.** Because a reader can no longer assume "the seat lives
+in the subdirectory named after it," the Orchestrator's own `CLAUDE.md`
+WHO-AM-I/roster table should state the seat's real repo path explicitly next
+to its identity — e.g. `impl-<name>` → `/path/to/sibling-repo` (not a
+subdirectory of the Orchestrator's own tree) — so nobody goes looking for it
+nested later.
+
+**Bootstrap is unchanged.** The identity-bootstrap handshake (TOFU
+`🛰️ HEADS-UP` → `🤝 ASSIGN-IDENTITY`, key enrollment via `coord-keygen.sh
+--enroll`) works exactly as documented in the main `README.md` § Identity
+Bootstrap / § Enrollment handshake — this topology needs no bootstrap
+variant of its own. A pre-assigned identity (no bootstrap handshake) enrolls
+the same way too.
+
+**A known, already-accepted absolute-path-hook fragility (not new here).**
+If the Orchestrator repo's absolute path is ever moved or deleted, the
+sibling seat's `coordination-precommit-hook.sh` invocation (wired by
+absolute path in its own `.claude/settings.json`) fails to find the script
+at all. Under Claude Code's PreToolUse exit-code convention this fails
+**silently non-blocking** — the secret-scan and mailbox-read gate simply
+stop running, rather than the commit being blocked — the same shape this
+framework's existing absolute-path-hook pattern (nested Implementers
+included) has already accepted, not a risk this topology introduces.
+
+---
+
 ## Cutover checklist (hub)
 
 1. Ensure remote ssh alias works non-interactively (`ssh -o BatchMode=yes <alias> true`).

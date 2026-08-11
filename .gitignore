@@ -2,7 +2,10 @@
 
 # Native agent working-memory (auto-created by the `memory: project` frontmatter).
 # The committed, portable memory is .samantha/agents/<name>/MEMORY.md (the curated notebook).
-.claude/agent-memory/
+# Slash-anchored at repo root only — a subagent run with cwd set to a nested
+# directory (e.g. a docs subtree) creates its own nested .claude/agent-memory/
+# that this pattern misses. Match at any depth instead.
+**/.claude/agent-memory/
 
 # Session scratch.
 .samantha/scratch/

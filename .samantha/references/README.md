@@ -46,8 +46,8 @@ The overlay is always *thin*: paths, the human's handle, deploy target, canonica
 | `canonical-docs-system/README.md` | The full recipe: single source of truth, section taxonomy, status discipline, governance |
 | `canonical-docs-system/SYSTEMS-hub-template.md` | The per-system hub-doc with canonical frontmatter |
 | `canonical-docs-system/INDEX-generator.README.md` | Generator design + CI contract (completeness-by-construction) |
-| `coordination-protocol/` | Orchestrator–Implementer coordination — **M9 STAR** (**star mode**; formerly dual). **PROTOCOL 1.4.0**: SSH message-signing (origin auth + tamper-evidence) on top of 1.3.0's project-scoped spoke awareness; skills `coordinate` + `coordinate-solo` + `coordinate-star`. Scripts share `PROTOCOL-VERSION` stamp with docs. |
-| `coordination-protocol/README.md` | The full M9 protocol: topology, bootstrap, message grammar, the **6 disaster rules**, hub-mediated deploy windows, **addressed wake filter (1.2.1)**, **SSH message signing (1.4.0)** |
+| `coordination-protocol/` | Orchestrator–Implementer coordination — **M9 STAR** (**star mode**; formerly dual). **PROTOCOL 1.5.0**: a protocol-version handshake (bootstrap exchange + re-arm-time staleness detection + self-upgrade pointer) on top of 1.4.0's SSH message-signing (origin auth + tamper-evidence) and 1.3.0's project-scoped spoke awareness; skills `coordinate` + `coordinate-solo` + `coordinate-star`. Scripts share `PROTOCOL-VERSION` stamp with docs. |
+| `coordination-protocol/README.md` | The full M9 protocol: topology, bootstrap, message grammar, the **6 disaster rules**, hub-mediated deploy windows, **addressed wake filter (1.2.1)**, **SSH message signing (1.4.0)**, **protocol-version handshake (1.5.0)** |
 | `safety-carveouts.md` | Hard stop-gates: security-fix, irreversible-action, web-proof rules |
 | `templates/` | Canonical forge templates for skills and workflows |
 | `templates/SKILL-template/SKILL.md` | Canonical SKILL.md — frontmatter options + body structure, heavily commented |
