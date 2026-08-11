@@ -536,11 +536,16 @@ echo "[heartbeat] Discover-on-idle: $([ "$ROLE" = "orchestrator" ] && echo "ENAB
 # ── helpers ───────────────────────────────────────────────────────────────────
 
 count_ready_wos() {
-  # Count READY (unclaimed, buildable) WOs in QUEUE.md.
-  # Looks for "| READY |" in the queue table (QUEUE-template.md format).
-  [[ -f "$QUEUE_FILE" ]] || { echo 0; return; }
-  local n
-  n=$(grep -c "| READY |" "$QUEUE_FILE" 2>/dev/null) || true
+  # Count READY (unclaimed, buildable) WOs across every live per-repo
+  # queue-<repo>.md in COORD_DIR. QUEUE.md itself is a historical/stale
+  # index rollup (per CLAUDE.md: "not a single-repo table") and is NOT
+  # kept current — counting only it produced false READY=0 self-nudges
+  # even when per-repo queues were well above DEPTH_FLOOR (found 2026-08-11).
+  local n=0 f
+  for f in "$COORD_DIR"/queue-*.md; do
+    [[ -f "$f" ]] || continue
+    n=$(( n + $(grep -c "| READY |" "$f" 2>/dev/null || echo 0) ))
+  done
   echo "${n:-0}"
 }
 

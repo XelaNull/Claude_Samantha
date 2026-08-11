@@ -676,6 +676,62 @@ for hi, span in consumed_walk(relevant):
                 exempt = True
             elif tag.startswith("⚠️ ") and body_starts_with_sentinel(hi):
                 exempt = True
+        elif (
+            frm.startswith("pending-")
+            and tag.startswith("🛰️ HEADS-UP")
+            and header_idxs
+            and hi == header_idxs[0]
+            and match_principal(file_basename)
+        ):
+            # EXEMPTION (d) (2026-08-11, git-anchor catch-22 fix — see
+            # DECISION-COORD-VERIFY-POST-ADOPT-BOOTSTRAP): exemption (a)
+            # above requires FROM == file_basename, which holds for a
+            # still-provisional pending-<uuid>.md but breaks PERMANENTLY the
+            # moment bootstrap-identity.sh --adopt renames that file to the
+            # assigned identity's own name (pending-<uuid> != impl-<name>
+            # forever after — the rename never rewrites this message's FROM,
+            # by design; see the header comment's STRUCTURAL CHECK note on
+            # why escalating this to INVALID was tried and reverted). The
+            # documented "intended fix" — get one commit to exist so the
+            # precommit hook's git-anchored floor stops re-scanning
+            # pre-commit content — cannot happen if THIS is the only
+            # non-exempt UNVERIFIED message blocking that very first commit
+            # under --strict: a structural deadlock, not friction.
+            #
+            # This exemption closes it narrowly, without loosening the
+            # FROM == file_basename gate itself (which stays intact for (a)/
+            # (b)/(c) — no other exemption changes): a message qualifies ONLY
+            # if it is the literal FIRST header in the file (hi ==
+            # header_idxs[0] — position-anchored, cannot appear mid-mailbox)
+            # AND the file's CURRENT name is itself an enrolled identity in
+            # allowed_signers (match_principal(file_basename) — proves this
+            # is a real, keygen-enrolled seat's own file, not an arbitrary
+            # attacker-chosen filename). Both conditions together reconstruct
+            # exactly the legitimate shape: "this file's first-ever message
+            # is that seat's own pre-adoption birth-cry, and the seat has
+            # since been genuinely enrolled" — the enrollment step itself
+            # (coord-keygen.sh --enroll) is a separate, human/hub-mediated
+            # action that cannot be forged by merely writing to a mailbox
+            # file. An attacker with coord-dir write access could still
+            # create a brand-new file and claim this shape, but the same is
+            # already true of exemption (a) today (a still-provisional
+            # pending-*.md needs no signature by design — trust doesn't
+            # exist yet for a newborn); this exemption cannot grant that
+            # forgery any MORE reach than (a) already has, since it only
+            # fires once the file's name is already a real enrolled
+            # principal — i.e. after the point where forging a new identity
+            # would have required forging the enrollment step too.
+            #
+            # Deliberately NOT implemented: cross-file verification that a
+            # real VERIFIED 🤝 ASSIGN-IDENTITY reply in orchestrator.md
+            # actually maps this FROM to this file_basename. That would be
+            # the gold-standard version but requires this per-file-scoped
+            # script to read a second file, a real design change to how
+            # coord-verify.sh is invoked (currently single --file argument;
+            # coordination-precommit-hook.sh calls it once per changed
+            # file). Left as a possible future hardening, not required to
+            # close the structural deadlock this exemption exists for.
+            exempt = True
         results.append((verdict, frm, ts, tag, exempt, "", None))
 
 # ROUND-12 (2026-08-10, Cipher HIGH): --tail-verified's window boundary is
