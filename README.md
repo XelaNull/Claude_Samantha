@@ -1,6 +1,6 @@
 # Samantha Prime — Multi-Agent Framework for Claude Code & Cursor
 
-**Version: 2.2.3** | **Last Updated: 2026-08-03** | **Min Claude Code: v2.1.77+**
+**Version: 2.2.4** | **Last Updated: 2026-08-12** | **Min Claude Code: v2.1.77+**
 
 This repository contains the canonical definitions for the **Samantha Prime** multi-agent framework. Copy it into any project to activate Samantha as the primary session agent — co-creator, project manager, adversarial reviewer, and quality gate.
 
@@ -567,6 +567,7 @@ Skills MUST be named `SKILL.md` (uppercase, exact match). Claude Code auto-disco
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 2.2.4 | 2026-08-12 | **Coordination PROTOCOL 1.6.0** — canonical queue schema + writer/lint tooling, backported from a live deployment (Nebuspace) after its per-repo `queue-<repo>.md` files drifted into 7-13 incompatible ad hoc table variants with no canonical writer ever having existed to prevent it: `queue_schema.py` (canonical 6-column row schema + a `classify()` heuristic cross-checking a row's declared Status against its own content), `queue-append.py` (the sanctioned writer — refuses duplicate WO-ids, auto-routes overflow), `queue-lint.py` (read-only schema/cap/dup sweep). Optional — for sites using the per-repo pull-queue shape; does not change behavior for existing single-global-push-queue sites. |
 | 2.2.3 | 2026-08-03 | **Coordination PROTOCOL 1.2.0** — portable backport of live dual-suite extensions: IDLE-KICK (distinct from discover-on-idle), `--idle-policy`, HOLD-DAMP-V2, `--weak-seat`, `--role` + STAR excludes (`PROJECTS.md` / `queue-*.md`), optional remote ssh bus documented in `advanced/REMOTE-SEATS.md` (`--remote-host` requires `--remote-bus-dir`; no baked paths). Do not blind-overwrite live Nebuspace `.claude/` overlays without a per-file newer check. |
 | 2.2.2 | 2026-08-03 | **Cursor agent bridge** — `sync-cursor-agents.sh` (+ wrapper `sync-cursor.sh`) generates `.cursor/agents/*.md` from `.claude/agents/`, mapping Claude Code model aliases (`sonnet`/`opus`/`haiku`) to Cursor Anthropic IDs and dropping Claude-only frontmatter (`tools`/`memory`/`hooks`). Cursor prefers `.cursor/agents/` over `.claude/agents/` on name clash. Install/docs updated. |
 | 2.2.1 | 2026-08-03 | **STAR-topology + multi-project coordination documentation gap fix** — top-level README skimmers previously had no mental model of dual-mode's hub/spoke shape; added an ASCII-diagrammed "Dual mode is a STAR, not a mesh" subsection under Deployment Topologies (single-writer-per-file, hub-watches-all/spoke-watches-hub-only, no spoke-to-spoke/self-watching) plus a pointer to the reference pack's fuller treatment. Also added the previously-undocumented `## Multi-project coordination` section to `coordination-protocol/README.md` (hub-only project board, per-repo `queue-<repo>.md` files, `impl-<repo>` identity/zone-routing SSOT, cwd/zone-mismatch STOP, sub-repo lane splits) — a pattern already in live use downstream but never generalized back into the framework, leaving a dangling citation to a section that didn't exist. Docs-only; no behavior change. |
