@@ -1,5 +1,12 @@
 # QUEUE — Claimable Work Orders
 
+> **Multi-project sites (per-repo `queue-<repo>.md` files, § Multi-project coordination in README.md):**
+> this template's richer 10-column schema and push-assignment model is one valid shape for a single
+> global queue. If your site instead runs one `queue-<repo>.md` per downstream repo with seats
+> self-filing discovered work, use the simpler canonical 6-column schema + `queue-append.py`/
+> `queue-lint.py` tooling documented in README.md § Canonical queue schema + tooling (PROTOCOL 1.6.0)
+> instead — don't mix the two schemas in one file.
+
 <!--
   TEMPLATE — the Orchestrator's WORK QUEUE for dual-mode operation.
   Copy to <coord-dir>/QUEUE.md and clear the example entries.

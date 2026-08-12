@@ -159,6 +159,7 @@ Otherwise: **stay in solo mode** (background subagents via `run_in_background`).
 | **Required (dual)** | `coord-monitor.sh` · `coord-send.sh` · `coord-status.sh` · `heartbeat.sh` · `bootstrap-identity.sh` · `coordination-precommit-hook.sh` · `coord-keygen.sh` · `coord-verify.sh` (+ `allowed_signers`, Orchestrator-created) | Every dual workspace root — signing is Required, not optional, as of PROTOCOL 1.4.0: `coord-send.sh` always signs |
 | **Optional (PROTOCOL 1.1.0)** | `coord-protocol-metrics.sh` · `coord-session-healthcheck.sh` · `coord-evidence-lint.sh` · `coord-gate-audit.sh` (+ `PROTOCOL-AMENDMENTS.tsv`) | Dual sites adopting the robustness amendment |
 | **Optional (PROTOCOL 1.2.0)** | Remote ssh bus — same `coord-monitor`/`heartbeat` binaries with `--remote-host` + `--remote-bus-dir`; see `advanced/REMOTE-SEATS.md` | Dual sites with off-box Implementers |
+| **Optional (PROTOCOL 1.6.0)** | `queue_schema.py` · `queue-append.py` · `queue-lint.py` — canonical queue-row schema + writer + lint, see § Canonical queue schema + tooling below | Sites running `queue-<repo>.md` files (single or multi-project) that want schema drift prevented rather than cleaned up after the fact |
 | **Do not copy** | Anything under `retired/` | Tombstones only — **no executables**. History in git. |
 
 Implementer sub-repos invoke the **parent workspace** copies by absolute path — they do not need a second full suite.
@@ -247,6 +248,21 @@ The STAR topology above assumes one Orchestrator coordinating spokes inside a si
 - **Sub-repo lane splits inherit the same rule.** A single downstream repo can itself split into multiple Implementer seats on disjoint path lanes (e.g. a frontend lane and a backend lane within one repo) — each still gets its own identity and declared `zone`, checked the same way. Multi-project support is really "zone precision, applied at whatever granularity the deployment needs" — repo-level or lane-level.
 
 The STAR invariants (single-writer-per-file, hub watches all spokes, spokes watch only the hub, no spoke-to-spoke watching) are unchanged — multi-project just adds a routing layer (`zone` + per-repo queues + a hub board) on top so one hub can safely fan out across more than one codebase.
+
+---
+
+## Canonical queue schema + tooling (PROTOCOL 1.6.0)
+
+**The gap this closes:** nothing in the base protocol above defines what a *row* in `queue-<repo>.md` must look like, beyond QUEUE-template.md's starting example. Left unenforced, every agent hand-formats rows differently as the file grows across weeks/months — a downstream deployment (2026-08-12) accumulated **7-13 incompatible ad hoc table variants per file** this way, with no canonical writer or lint ever existing to catch it. The worst instance: a work-order row stayed classified as buildable-now despite its own description text reading "confirmed shipped — not claimable, already done" — nothing was checking a row's declared Status against what its own content actually said.
+
+**Canonical row schema** (6 columns): `| WO | Priority | Status | Claimed-by | Verified-against | Description |`. Priority is `HIGH`/`MED`/`LOW` or `P0`-`P4` (pick one vocabulary per project, don't mix). Status is one of `CURRENT` / `PENDING` (alias `READY`) / `DONE` / `GATED` / `PARKED` / `NEEDS-TRIAGE`.
+
+**Three files, one import chain:**
+- `queue_schema.py` — the schema itself: column shape, valid-value regexes, a schema-drift-tolerant row parser (`parse_table`/`parse_table_text`), a `classify()` heuristic that infers a row's real status from its own cell content (not just a literal `status` column — several drifted schemas bury the real signal in a `gate/verified` or description cell instead), and `validate_row()` which cross-checks a row's *declared* Status against what `classify()` infers from its *content* — this cross-check is what would have caught the "confirmed shipped... already done" row above.
+- `queue-append.py` — the only sanctioned way to add a row. Validates against the schema before writing, refuses duplicate WO-ids (`--force` to override), and auto-routes overflow past `--cap` (default 24) into `backlog-<repo>.md`'s overflow section instead of silently blowing past the depth-floor-adjacent cap. `--dir` points at the coord-dir (defaults to `$COORD_DIR` or `./.samantha/coord`).
+- `queue-lint.py` — read-only sweep. Reports column-shape drift, invalid Priority/Status values, duplicate WO-ids, cap overruns, and the declared-vs-content disagreement check above. `--all` additionally lints a backlog file's own quick-reference tables (not its verbatim historical dump, which intentionally preserves whatever legacy shape it always had). Run it periodically — each proactive discovery-pass wake is a natural cadence — not only when something already looks wrong.
+
+**Adoption note:** these three files have zero hardcoded paths (`queue-lint.py`/`queue-append.py` take `--dir`, `queue_schema.py` is pure logic) — copy all three together into a site's script directory; they don't need anything else from this reference pack to run. Building/rolling this out at a site whose queue files are already schema-drifted needs a one-time manual triage pass first (don't trust a first-pass automated migration on messy legacy schemas without a self-test-then-verify step — build the classifier, run it read-only, spot-check disagreements, *then* apply) — the tooling here prevents the drift from recurring, it doesn't retroactively fix years of hand-formatting on its own.
 
 ---
 
