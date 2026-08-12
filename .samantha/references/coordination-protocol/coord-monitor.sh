@@ -584,11 +584,48 @@ emit_own_idle_kick() {
   return 0
 }
 
-# Initialize offsets to the CURRENT end so we stream only NEW messages, never replay history.
-for f in $(watched); do printf '%s' "$(size_of "$f")" > "$(offset_file "$f")"; done
-# Own file: baseline at EOF too (first HEARTBEAT after arm is the first kick).
+# Initialize offsets to the CURRENT end on a seat's FIRST-EVER arm only, so it
+# streams only NEW messages rather than replaying a whole project's history.
+# BUG FIXED 2026-08-12 (found live in a downstream deployment, Nebuspace:
+# a seat silently missed a ✅ GO posted during a ~5min TUI-spin-down gap, sat
+# on already-approved work for 2h14m with nothing but self-nudge heartbeats
+# until the hub proactively PINGed it): this used to reset EVERY watched
+# file's offset to current EOF on EVERY arm, unconditionally — including a
+# re-arm after a routine stop/start cycle, not just a genuinely first-ever
+# arm. Any message posted to a watched file while this seat's monitor
+# process was not running (spun down, crashed, between sessions) fell in the
+# dead window between the last real offset and the new EOF and was
+# permanently skipped: never streamed, never logged as missed, no signal to
+# the hub or the seat that anything was dropped — a silent deaf gap, worse
+# than the already-documented "background process with no output→chat
+# bridge" gap because there was no error at all. Fix: only stamp EOF when no
+# offset file already exists for this (identity, coord-dir) pairing; a real
+# prior offset is a legitimate resume point and is left alone so the next
+# poll naturally emits whatever was missed during the downtime as one
+# batched catch-up chunk (emit_new() already handles arbitrarily-sized
+# deltas as a single "COORD ▼" block, and still correctly detects a genuine
+# shrink/archive-rewrite via its existing cur<prev branch on the first live
+# poll, since a real rewrite drops the persisted offset below the
+# post-rewrite EOF).
+for f in $(watched); do
+  of="$(offset_file "$f")"
+  if [ ! -f "$of" ]; then
+    printf '%s' "$(size_of "$f")" > "$of"
+  else
+    prev="$(cat "$of" 2>/dev/null || echo 0)"
+    cur="$(size_of "$f")"
+    if [ -n "${cur:-}" ] && [ "$cur" -gt "${prev:-0}" ] 2>/dev/null; then
+      printf '┃ COORD i resuming %s from saved offset %s (catching up %s bytes from before this arm)\n' \
+        "$(basename "$f")" "$prev" "$((cur - prev))"
+    fi
+  fi
+done
+# Own file: same fix — only baseline at EOF on a genuinely first-ever arm.
 OWN_FILE="$DIR/$IDENT.md"
-[ -f "$OWN_FILE" ] && printf '%s' "$(size_of "$OWN_FILE")" > "$(offset_file "$OWN_FILE")"
+if [ -f "$OWN_FILE" ]; then
+  of="$(offset_file "$OWN_FILE")"
+  [ -f "$of" ] || printf '%s' "$(size_of "$OWN_FILE")" > "$of"
+fi
 
 # ── PROTOCOL 1.5.0 §3.5 Part B: re-arm-time protocol-version staleness check
 #    (human's explicit "pointer, not push" design — see coord-presence.sh's

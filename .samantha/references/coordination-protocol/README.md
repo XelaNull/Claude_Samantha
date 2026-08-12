@@ -1,11 +1,24 @@
 # Coordination Protocol — Orchestrator–Implementer
 
-PROTOCOL-VERSION: 1.6.0
+PROTOCOL-VERSION: 1.6.1
 
 > **Versioning:** bump `PROTOCOL-VERSION` (file + this stamp) on every ratified amendment.
 > **Scripts are versioned with the protocol** — `PROTOCOL-VERSION` is sourced by
 > `coord-monitor.sh` / `heartbeat.sh`; arm banners print the stamp. A seat running
 > scripts whose stamp ≠ this README is a defect.
+>
+> **1.6.1** (2026-08-12) — `coord-monitor.sh` bugfix: offset-persistence across
+> re-arms. Found live in a downstream deployment: every arm/re-arm unconditionally
+> reset EVERY watched file's saved read-offset to current EOF — not just a
+> genuinely first-ever arm — so any message posted while a seat's monitor
+> process wasn't running (spin-down, crash) fell into that dead window and was
+> silently, permanently skipped: no error, no log, no signal to either side.
+> A seat sat on an already-approved commit for 2h14m with only self-nudge
+> heartbeats until the hub proactively PINGed it. Fixed: offset now only
+> initializes to EOF on a genuinely first-ever arm (no existing `.off` file);
+> a real prior offset is preserved so the next poll naturally emits whatever
+> was missed as one batched catch-up chunk. PATCH — no new protocol surface,
+> pure bugfix to already-shipped script behavior.
 >
 > **1.6.0** (2026-08-12) — Canonical queue schema + tooling: `queue_schema.py`
 > (canonical 6-column row schema + a `classify()` heuristic cross-checking a row's
