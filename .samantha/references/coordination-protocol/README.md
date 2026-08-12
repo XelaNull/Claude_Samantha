@@ -1,11 +1,23 @@
 # Coordination Protocol — Orchestrator–Implementer
 
-PROTOCOL-VERSION: 1.5.0
+PROTOCOL-VERSION: 1.6.0
 
 > **Versioning:** bump `PROTOCOL-VERSION` (file + this stamp) on every ratified amendment.
 > **Scripts are versioned with the protocol** — `PROTOCOL-VERSION` is sourced by
 > `coord-monitor.sh` / `heartbeat.sh`; arm banners print the stamp. A seat running
 > scripts whose stamp ≠ this README is a defect.
+>
+> **1.6.0** (2026-08-12) — Canonical queue schema + tooling: `queue_schema.py`
+> (canonical 6-column row schema + a `classify()` heuristic cross-checking a row's
+> declared Status against its own content), `queue-append.py` (the sanctioned
+> writer — refuses duplicate WO-ids, auto-routes overflow to a backlog file's
+> "READY, over the cap" section), `queue-lint.py` (read-only schema/cap/dup
+> sweep). Backported from a live deployment (Nebuspace) after its per-repo
+> `queue-<repo>.md` files drifted into 7-13 incompatible ad hoc table variants
+> with no canonical writer ever having existed to prevent it. Optional — for
+> sites using the per-repo pull-queue shape (see `QUEUE-template.md`); does not
+> apply to the single-global-push-queue pattern. No script behavior for
+> existing single-queue sites changes; adopting this tier is opt-in.
 >
 > **1.5.0** (2026-08-10) — Protocol Version Handshake: peer staleness detection +
 > self-upgrade pointer, never a push:
