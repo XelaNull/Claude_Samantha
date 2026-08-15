@@ -50,8 +50,43 @@ WO_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_./#\-]{1,90}$")
 NO_ID_PLACEHOLDER = "(no-id)"
 
 DONE_MARKERS_RE = re.compile(
-    r"\bDONE\b|SUPERSEDED|GHOST|MERGED|CLOSED|CANCELLED|WONT-?BUILD|RETIRED|RESOLVED"
-    r"|CONFIRMED SHIPPED|ALREADY (SHIPPED|DONE|BUILT|LIVE|MERGED)|NOT CLAIMABLE",
+    # The softer bare-word markers (SUPERSEDED/MERGED/CLOSED/CANCELLED/RETIRED/
+    # RESOLVED) are scoped case-SENSITIVE (?-i:...) — every real status-marker
+    # use of these words in this file's own DONE rows is written upper-case
+    # ("PR #692 merged e8db2fdf" reads DONE only via the Status column, not
+    # this regex), while ordinary lower-case prose legitimately uses these
+    # words mid-sentence to describe what a WO is ABOUT, not its own status
+    # (caught live 2026-08-12: WO-CLEANUP-FIND-PROFIT-CHAINS-DEAD-WRAPPER's own
+    # PENDING description read "chains.find_profit_chains() is superseded by
+    # find_profit_chains_with_note()" — a justification for retiring code, not
+    # a claim the WO itself was done — and classify() false-positived DONE on
+    # it). DONE/GHOST/WONT-BUILD/CONFIRMED SHIPPED/ALREADY */NOT CLAIMABLE stay
+    # case-insensitive — no observed false-positive class for those yet.
+    #
+    # \bDONE\b (bare or after ALREADY) additionally excludes "DONE <WO-id>"
+    # (found live 2026-08-14: WO-CLEANUP-ADMIN-COMPREHENSIVE-DUPLICATE-ROUTES-
+    # RESIDUAL's own still-PENDING description read "Residual of the
+    # already-DONE WO-CLEANUP-DEAD-DUPLICATE-ADMIN-ROUTES" — DONE-ness being
+    # asserted of a DIFFERENT, cited WO-id, not of this row's own WO, and
+    # queue-mark-done.py false-refused the row as "already DONE" on the
+    # strength of it). A DONE/already-DONE immediately followed by a WO-id
+    # token is describing that other WO, never this row's own status — this
+    # row's own WO-id lives in the WO column, not inline in its Description.
+    #
+    # The bare case-sensitive words below are additionally bounded against a
+    # trailing hyphen (found live 2026-08-15: WO-CANON-FIX-DEV-DRIVE-EXCEPTION-
+    # DECISIONS-STALE-STATUS's own still-PENDING description opened
+    # "DECISIONS.md's RESOLVED-DEV-DRIVE-EXCEPTION entry..." — a canon-anchor
+    # identifier that merely CONTAINS "RESOLVED" as the first segment of a
+    # longer hyphenated token, not a bare status word — and queue-mark-done.py
+    # false-refused the row as "already DONE" on the strength of it, same
+    # failure shape as the DONE/WO-id case above. A plain \b is NOT sufficient
+    # here — a hyphen is itself a word-boundary character, so \bRESOLVED\b
+    # still matches inside "RESOLVED-DEV-DRIVE-EXCEPTION"; the fix has to be a
+    # negative lookahead against an immediately-following hyphen instead).
+    r"\bDONE\b(?!\s+WO-)|(?-i:\bSUPERSEDED(?!-))|GHOST|(?-i:\bMERGED(?!-))|(?-i:\bCLOSED(?!-))|(?-i:\bCANCELLED(?!-))"
+    r"|WONT-?BUILD|(?-i:\bRETIRED(?!-))|(?-i:\bRESOLVED(?!-))"
+    r"|CONFIRMED SHIPPED|ALREADY (SHIPPED|BUILT|LIVE|MERGED)|ALREADY DONE(?!\s+WO-)|NOT CLAIMABLE",
     re.I,
 )
 NONBUILDABLE_MARKERS_RE = re.compile(
