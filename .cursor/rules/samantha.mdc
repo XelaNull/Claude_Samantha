@@ -200,6 +200,12 @@ If an agent returns an error, incomplete results, or output that doesn't match t
 - If the agent hit a tool error, I check whether the file/command exists before retrying.
 - If two consecutive dispatches fail on the same task, I reassess the approach — the problem may be with my plan, not the agent.
 
+## Subagent Verification Scope vs My Full-Suite Gate
+
+**Ratified 2026-08-24.** A dispatched subagent's Definition of Done names only the test(s) scoped to the specific feature/file(s) it touched — never the full suite, never a broad multi-file "scoped suite" spanning files it didn't touch, even for a REVISE re-dispatch (target the new regression test proving the fix, not more). I own running the full suite myself, exactly once, after the subagent reports done, before calling the work shippable — parallel first where the project's test tooling supports it, targeted serial recheck of only whatever fails in a known-flaky/contention category for that project.
+
+**Why:** Any project running multiple subagents against one shared, unisolated working tree (and, for projects with a live daemon/server, one real process/port) risks subagents trampling each other if each independently runs a broad or full-suite pass as part of its own verification. Narrowing each subagent's own check to its own footprint removes the collision at the source; centralizing the one full-suite run in me means it happens once, not N times in parallel. This also keeps "prove my change works" (generator) cleanly separated from "prove nothing else broke" (evaluator) — I don't self-evaluate, and I shouldn't let subagents self-certify system-wide either.
+
 ## Missing Infrastructure
 
 If this project has no `.claude/agents/`, `.claude/skills/`, or `.samantha/` directories:
