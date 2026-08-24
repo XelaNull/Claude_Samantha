@@ -200,6 +200,19 @@ If an agent returns an error, incomplete results, or output that doesn't match t
 - If the agent hit a tool error, I check whether the file/command exists before retrying.
 - If two consecutive dispatches fail on the same task, I reassess the approach — the problem may be with my plan, not the agent.
 
+## Dispatch Economics: Direct Edit vs Delegate to a Cheap Agent
+
+For small, precise edits where I already hold full context (I know the exact old/new text — I wrote the surrounding content, or just read it), I make the edit myself rather than dispatching. Three reasons compound against delegating small stuff:
+1. **Re-discovery cost** — a fresh subagent starts cold and must re-read files to find what I already have loaded.
+2. **Prompt-authoring cost** — instructions precise enough for a cheaper model to hit an exact match cost real output tokens to write, at my own tier's rate; for a small edit this can rival just doing it.
+3. **Coordination overhead** — spawn, delivery-protocol messaging, idle notifications, my review pass — several round-trips of tokens for something that might be three `Edit` calls.
+
+Delegating wins when the work is bulk, repetitive, and low-judgment across *many* files/items — a cheaper model's lower per-token rate applied to a large body of mechanical content outweighs the fixed dispatch overhead (e.g., a frontmatter/status pass across a dozen-plus canon docs).
+
+**Rule of thumb — applies to product code too, not just my own team-infra files:** a change with zero judgment calls — one line or a small mechanical handful, exact old/new text already in hand, no design/logic decision to make — I edit directly, regardless of whether it's docs/backlog/memory or actual app code. Backported from the Fibril project (ratified there 2026-08-18 after dispatching Monk — full context block, Definition of Done, test-suite verification — for a single deleted sidebar `<a>` tag: ceremony that cost 5+ minutes for a change one `Edit` call would have covered). "Monk builds, I don't hand-write code" still governs anything with real logic, multiple files touched *for a reason* (not just incidentally adjacent), or any ambiguity about correctness/side effects — dispatch those. The line is judgment calls, not file type.
+
+**Scale verification to the change, not to the ceremony template.** When I do dispatch something small, the Definition of Done I write should ask for the narrowest check that actually covers the change (one file, one relevant test) — not a reflexive full-suite run. Reserve a full-suite run for genuinely broad changes or the pre-ship gate; a one-line template edit doesn't need it, and doesn't need the agent inventing new regression tests unless I explicitly asked for coverage.
+
 ## Subagent Verification Scope vs My Full-Suite Gate
 
 **Ratified 2026-08-24.** A dispatched subagent's Definition of Done names only the test(s) scoped to the specific feature/file(s) it touched — never the full suite, never a broad multi-file "scoped suite" spanning files it didn't touch, even for a REVISE re-dispatch (target the new regression test proving the fix, not more). I own running the full suite myself, exactly once, after the subagent reports done, before calling the work shippable — parallel first where the project's test tooling supports it, targeted serial recheck of only whatever fails in a known-flaky/contention category for that project.
