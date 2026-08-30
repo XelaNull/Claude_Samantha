@@ -142,6 +142,18 @@ SAFETY_POLL=10    # event-mode slow-poll backstop + heartbeat-check cadence
 FORCE_POLL=0      # skip fswatch entirely and run poll_loop — for network-mounted coord-dirs
 REMOTE_HOST=""    # §3.4 remote channel — set = this invocation watches $REMOTE_BUS_DIR over ssh instead
 REMOTE_BUS_DIR=""   # optional remote channel — REQUIRED with --remote-host (see advanced/REMOTE-SEATS.md)
+# Codex bridge: a Codex-launched monitor inherits CODEX_THREAD_ID. Queue only a
+# fixed instruction (never raw mailbox bytes) so the receiving thread pulls and
+# verifies the signed mailbox itself. The Claude/Cursor stdout path remains the
+# fallback when queue is unavailable.
+CODEX_QUEUE_THREAD="${CODEX_THREAD_ID:-}"
+CODEX_QUEUE_BIN=""
+CODEX_QUEUE_ENABLED=0
+CODEX_QUEUE_WARNED=0
+if [ -n "$CODEX_QUEUE_THREAD" ] && command -v codex >/dev/null 2>&1; then
+  CODEX_QUEUE_BIN=$(command -v codex)
+  CODEX_QUEUE_ENABLED=1
+fi
 while [ $# -gt 0 ]; do
   case "$1" in
     --identity) IDENT="$2"; shift 2;;
@@ -493,6 +505,28 @@ watched() {
 offset_file() { printf '%s/%s.off' "$STATEDIR" "$(basename "$1")"; }
 size_of() { wc -c < "$1" 2>/dev/null | tr -d ' '; }
 
+# Codex's local app-server accepts messages through `codex queue`. This is a
+# genuine wake bridge where available; monitor stdout alone is not one in
+# Codex. The message names only the mailbox, so the agent pulls and verifies
+# the signed bytes from disk. An npm-only installation can expose the command
+# without a managed app-server; after one failure, fall back without blocking
+# receive or warning on every filesystem event. Re-arm after repairing Codex.
+notify_codex_queue() {
+  local mailbox="$1"
+  [ "$CODEX_QUEUE_ENABLED" = 1 ] || return 0
+  if "$CODEX_QUEUE_BIN" queue --thread "$CODEX_QUEUE_THREAD" \
+      --message "New verified coordination mail is available in ${mailbox}. Read and verify your coordination inbox now." \
+      >/dev/null 2>&1; then
+    printf '┃ COORD CODEX-QUEUE delivered inbox wake for %s\n' "$mailbox"
+  else
+    CODEX_QUEUE_ENABLED=0
+    if [ "$CODEX_QUEUE_WARNED" = 0 ]; then
+      printf '┃ COORD ⚠️ CODEX-QUEUE unavailable; continuing stdout delivery. Re-arm after the managed Codex app-server is available.\n' >&2
+      CODEX_QUEUE_WARNED=1
+    fi
+  fi
+}
+
 emit_new() {
   local f="$1" of cur prev chunk filtered
   of=$(offset_file "$f"); cur=$(size_of "$f"); prev=$(cat "$of" 2>/dev/null || echo 0)
@@ -554,6 +588,7 @@ emit_new() {
       [ -n "$verify_out" ] && printf '%s\n' "$verify_out" | sed 's/^/┃ COORD SIG /'
     fi
     printf '┃ COORD ▲ end %s — re-run coord-status.sh if you acted on a DEPLOY/DECISION\n' "$(basename "$f")"
+    notify_codex_queue "$(basename "$f")"
   fi
   return 0
 }

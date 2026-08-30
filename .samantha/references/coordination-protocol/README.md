@@ -202,6 +202,21 @@ Implementer sub-repos invoke the **parent workspace** copies by absolute path â€
 
 Arm **once per session** (persistent monitor). Do **not** re-arm after every message. On `heartbeat` `exit 42` (WATCHER-DOWN): re-arm the monitor **first**, then the heartbeat.
 
+### Codex queue bridge
+
+When `coord-monitor.sh` is launched by a Codex agent, it automatically uses the
+inherited `CODEX_THREAD_ID` to run `codex queue --thread â€¦` after an addressed
+mailbox delta. The queued prompt is deliberately only an inbox-wake instruction;
+the Codex thread must still read and verify the signed mailbox bytes itself.
+Normal monitor stdout remains enabled as a fallback for every harness.
+
+This needs a **managed standalone Codex app-server**, not only the npm CLI
+package: `codex queue` and `codex agents` connect through that daemon. Install
+the standalone distribution, run `codex app-server daemon bootstrap`, then
+start/re-arm the monitor from the Codex session so it inherits the current
+thread ID. If queue delivery cannot connect, the monitor prints one warning,
+falls back to stdout, and requires a re-arm after the app-server is repaired.
+
 ```bash
 ./coord-monitor.sh --identity <id> --dir <coord-dir>
 # optional on network-mounted coord-dirs:

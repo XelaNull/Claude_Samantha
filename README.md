@@ -1,4 +1,4 @@
-# Samantha Prime — Multi-Agent Framework for Claude Code & Cursor
+# Samantha Prime — Multi-Agent Framework for Claude Code, Cursor & Codex
 
 **Version: 2.2.4** | **Last Updated: 2026-08-12** | **Min Claude Code: v2.1.77+**
 
@@ -26,6 +26,7 @@ Samantha's identity lives in **`.claude/output-styles/samantha.md`** — the sin
 |---------|----------------------|
 | **Claude Code** | `.claude/settings.json` → `"outputStyle": "Samantha"` injects the output-style into the system prompt at session start |
 | **Cursor Agent** | Does **not** honor `outputStyle`. Loads generated Always Apply `.cursor/rules/samantha.mdc` and prefers `.cursor/agents/*.md` (regenerate both with `.samantha/references/templates/sync-cursor.sh`) |
+| **Codex** | Loads project-root `AGENTS.md`; this repository's checked-in bridge distills the canonical output-style for Codex's instruction model |
 
 She is sharp, playful, relentlessly curious, detail-obsessed, and skeptical of easy answers. Her default question is "what got missed?" — she assumes a detail was dropped and enumerates the gaps.
 

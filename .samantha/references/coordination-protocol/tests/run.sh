@@ -38,7 +38,7 @@ assert_not_contains() {
   esac
 }
 
-assert_eq "protocol-version-file" "$PROTOCOL_VERSION" "1.5.0"
+assert_eq "protocol-version-file" "$PROTOCOL_VERSION" "1.6.1"
 
 # PROTOCOL 1.5.0 §3.5 Part C/D: shared Protocol Version Handshake helpers
 # (coord-presence.sh) — direct unit coverage of the predicate + message
